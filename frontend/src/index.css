@@ -1,0 +1,282 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 98%; /* Slightly off-white for less glare */
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 24 95% 53%; /* Saffron kept as brand color */
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 24 95% 53%;
+    --radius: 1rem; /* More rounded corners */
+
+    /* Sidebar */
+    --sidebar: 0 0% 96%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-border: 240 5.9% 90%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%; /* Deep Zinc/Slate */
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 24 95% 53%;
+
+    /* Sidebar dark */
+    --sidebar: 240 10% 3.9%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 0 0% 98%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Inter", system-ui, sans-serif;
+    min-height: 100vh;
+    background-image: radial-gradient(
+        at 0% 0%,
+        hsla(24, 95%, 53%, 0.03) 0px,
+        transparent 50%
+      ),
+      radial-gradient(
+        at 100% 0%,
+        hsla(210, 100%, 50%, 0.03) 0px,
+        transparent 50%
+      );
+    background-attachment: fixed;
+  }
+}
+
+/* Glassmorphism Utilities */
+.glass {
+  @apply bg-white/70 dark:bg-black/40 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-lg;
+}
+
+.glass-card {
+  @apply bg-white/50 dark:bg-white/5 backdrop-blur-md border border-white/20 dark:border-white/10 shadow-sm;
+}
+
+.glass-input {
+  @apply bg-white/50 dark:bg-black/20 backdrop-blur-md border border-black/5 dark:border-white/10 focus:ring-2 focus:ring-primary/20 transition-all duration-300;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/50;
+}
+
+/* Scrollbar utility classes */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thumb-border::-webkit-scrollbar-thumb {
+  @apply bg-border;
+}
+
+.scrollbar-track-transparent::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+/* Markdown styles */
+.markdown-content {
+  @apply prose prose-slate max-w-none;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  @apply text-gray-900 font-semibold mt-4 mb-2;
+}
+
+.markdown-content p {
+  @apply text-gray-700 leading-relaxed mb-3;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  @apply my-2 pl-6;
+}
+
+.markdown-content li {
+  @apply mb-1;
+}
+
+.markdown-content code {
+  @apply bg-gray-100 rounded px-1 py-0.5 text-sm font-mono;
+}
+
+.markdown-content pre {
+  @apply bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto my-4;
+}
+
+.markdown-content blockquote {
+  @apply border-l-4 border-saffron-500 pl-4 italic text-gray-600 my-4;
+}
+
+/* Citation badge */
+.citation-badge {
+  @apply inline-flex items-center justify-center min-w-[1.5rem] h-6 px-2 text-xs font-semibold 
+         bg-saffron-100 text-saffron-800 rounded-full cursor-pointer hover:bg-saffron-200 
+         transition-colors duration-200;
+}
+
+/* Loading animation */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.loading-dot {
+  animation: pulse-dot 1.4s infinite ease-in-out;
+}
+
+.loading-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.loading-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+.loading-dot:nth-child(3) {
+  animation-delay: 0s;
+}
+
+/* Gradient backgrounds */
+.gradient-saffron {
+  background: linear-gradient(135deg, #ff9a37 0%, #ff7b10 50%, #f05f06 100%);
+}
+
+.gradient-tricolor {
+  background: linear-gradient(180deg, #ff9933 0%, #ffffff 50%, #138808 100%);
+}
+
+/* Message animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-animate {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Focus styles */
+input:focus,
+textarea:focus {
+  @apply ring-2 ring-saffron-500 ring-offset-2 outline-none;
+}
+
+button:focus-visible {
+  @apply ring-2 ring-saffron-500 ring-offset-2 outline-none;
+}
+
+/* Mode selector styles */
+.mode-selector-glow {
+  box-shadow: 0 0 12px currentColor;
+}
+
+/* Image container styles */
+.image-container {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Tooltip arrow styles */
+.tooltip-arrow {
+  position: absolute;
+  top: -0.5rem;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 1rem;
+  height: 1rem;
+  background: inherit;
+  border-top: inherit;
+  border-left: inherit;
+}
+
+/* Optimized image styles */
+.image-blur-placeholder {
+  background-size: cover;
+  background-position: center;
+}
+
+.image-fallback-icon {
+  width: 2rem;
+  height: 2rem;
+}

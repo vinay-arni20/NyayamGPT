@@ -1,0 +1,69 @@
+# NyayamGPT Robots.txt
+# AI-Powered Legal Assistant for Indian Law
+
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /signup
+Allow: /chat
+Allow: /about
+Allow: /help
+Allow: /privacy
+Allow: /terms
+
+# Disallow admin and API routes
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+Disallow: /_next/
+Disallow: /static/
+
+# Disallow JSON files (API responses)
+Disallow: /*.json$
+Disallow: /*.json?
+
+# Disallow source maps
+Disallow: /*.map$
+
+# Disallow private user routes
+Disallow: /dashboard/
+Disallow: /settings/
+Disallow: /profile/
+
+# Allow specific static assets
+Allow: /og-image.png
+Allow: /favicon.svg
+Allow: /logo.png
+Allow: /sitemap.xml
+
+# Crawl-delay for well-behaved bots
+Crawl-delay: 1
+
+# Sitemap location
+Sitemap: https://nyayamgpt.in/sitemap.xml
+
+# Specific bot rules
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 2
+
+# Block bad bots
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /

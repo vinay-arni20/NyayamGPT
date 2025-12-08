@@ -1,0 +1,1 @@
+"""NyayamGPT Schemas Module"""

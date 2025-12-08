@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+  <!-- Homepage -->
+  <url>
+    <loc>https://nyayamgpt.in/</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://nyayamgpt.in/en/"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://nyayamgpt.in/hi/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://nyayamgpt.in/"/>
+  </url>
+  
+  <!-- Login Page -->
+  <url>
+    <loc>https://nyayamgpt.in/login</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  
+  <!-- Signup Page -->
+  <url>
+    <loc>https://nyayamgpt.in/signup</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  
+  <!-- Chat Page -->
+  <url>
+    <loc>https://nyayamgpt.in/chat</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://nyayamgpt.in/en/chat"/>
+    <xhtml:link rel="alternate" hreflang="hi" href="https://nyayamgpt.in/hi/chat"/>
+  </url>
+  
+  <!-- About Page -->
+  <url>
+    <loc>https://nyayamgpt.in/about</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  
+  <!-- Privacy Policy -->
+  <url>
+    <loc>https://nyayamgpt.in/privacy</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  
+  <!-- Terms of Service -->
+  <url>
+    <loc>https://nyayamgpt.in/terms</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  
+  <!-- Help/FAQ -->
+  <url>
+    <loc>https://nyayamgpt.in/help</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
+
+</urlset>
