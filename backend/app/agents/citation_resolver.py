@@ -32,13 +32,17 @@ FALLBACK_SOURCE = "indiankanoon.org"
 
 # Known base URLs for direct linking
 KNOWN_URLS = {
-    "IPC": "https://www.indiacode.nic.in/handle/123456789/2263",
-    "CRPC": "https://www.indiacode.nic.in/handle/123456789/1611",
+    # New Criminal Laws (2024)
+    "BNS": "https://www.indiacode.nic.in/handle/123456789/20280",
+    "BHARATIYA_NYAYA_SANHITA": "https://www.indiacode.nic.in/handle/123456789/20280",
+    "BNSS": "https://www.indiacode.nic.in/handle/123456789/20281",
+    "BHARATIYA_NAGARIK_SURAKSHA_SANHITA": "https://www.indiacode.nic.in/handle/123456789/20281",
+    "BSA": "https://www.indiacode.nic.in/handle/123456789/20282",
+    "BHARATIYA_SAKSHYA_ADHINIYAM": "https://www.indiacode.nic.in/handle/123456789/20282",
+    # Other Acts
     "CPC": "https://www.indiacode.nic.in/handle/123456789/2191",
     "CONSTITUTION": "https://www.indiacode.nic.in/handle/123456789/1362",
     "IT_ACT": "https://www.indiacode.nic.in/handle/123456789/1999",
-    "EVIDENCE_ACT": "https://www.indiacode.nic.in/handle/123456789/1364",
-    "IEA": "https://www.indiacode.nic.in/handle/123456789/1364",
     "CONTRACT_ACT": "https://www.indiacode.nic.in/handle/123456789/2187",
     "MOTOR_VEHICLES_ACT": "https://www.indiacode.nic.in/handle/123456789/1798",
     "MVA": "https://www.indiacode.nic.in/handle/123456789/1798",
@@ -53,12 +57,16 @@ KNOWN_URLS = {
 
 # Act name mappings for search
 ACT_NAMES = {
-    "IPC": "Indian Penal Code",
-    "CRPC": "Code of Criminal Procedure",
+    # New Criminal Laws (2024)
+    "BNS": "Bharatiya Nyaya Sanhita",
+    "BHARATIYA_NYAYA_SANHITA": "Bharatiya Nyaya Sanhita",
+    "BNSS": "Bharatiya Nagarik Suraksha Sanhita",
+    "BHARATIYA_NAGARIK_SURAKSHA_SANHITA": "Bharatiya Nagarik Suraksha Sanhita",
+    "BSA": "Bharatiya Sakshya Adhiniyam",
+    "BHARATIYA_SAKSHYA_ADHINIYAM": "Bharatiya Sakshya Adhiniyam",
+    # Other Acts
     "CPC": "Code of Civil Procedure",
     "IT_ACT": "Information Technology Act",
-    "EVIDENCE_ACT": "Indian Evidence Act",
-    "IEA": "Indian Evidence Act",
     "CONTRACT_ACT": "Indian Contract Act",
     "MOTOR_VEHICLES_ACT": "Motor Vehicles Act",
     "MVA": "Motor Vehicles Act",
@@ -68,8 +76,8 @@ ACT_NAMES = {
     "HINDU_MARRIAGE_ACT": "Hindu Marriage Act",
     "IDA": "Industrial Disputes Act",
     "INDUSTRIAL_DISPUTES_ACT": "Industrial Disputes Act",
-    "NIA": "National Investigation Agency Act",
-    "NIA_ACT": "National Investigation Agency Act",
+    "NIA": "Negotiable Instruments Act",
+    "NIA_ACT": "Negotiable Instruments Act",
 }
 
 

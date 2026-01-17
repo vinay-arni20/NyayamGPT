@@ -14,9 +14,9 @@ from app.db import crud
 from app.rag.loader import (
     DocumentLoader,
     LegalDocument,
-    get_all_sample_data,
     get_all_legal_data,
 )
+
 from app.rag.vectorstore import (
     DocumentMetadata,
     get_default_vector_store,
@@ -303,7 +303,13 @@ def index_sample_data() -> int:
 
 async def initialize_vector_store(force_reindex: bool = False) -> int:
     """
-    Initialize vector store with legal data from JSON files.
+    Initialize vector store with all legal data (JSON + PDF files).
+    
+    This function handles:
+    - Loading all JSON datasets (IPC, CrPC, CPC, etc.)
+    - Loading all PDF datasets (BNS, BNSS, BSA, etc.)
+    - Intelligent reindexing (only when needed or forced)
+    - Batch processing for optimal performance
     
     Args:
         force_reindex: If True, reindex even if data exists
@@ -315,26 +321,65 @@ async def initialize_vector_store(force_reindex: bool = False) -> int:
     stats = service.get_stats()
     current_count = stats.get("count", 0)
     
-    # Load documents to see how many we should have
+    # Load all documents (JSON + PDF)
     documents = get_all_legal_data(use_json_files=True)
     expected_count = len(documents)
     
-    # Reindex if empty, forced, or count mismatch (new data added)
-    if current_count == 0 or force_reindex or (expected_count > 0 and current_count < expected_count // 2):
-        if current_count > 0:
+    if expected_count == 0:
+        logger.warning("No legal documents found to index")
+        return 0
+    
+    # Calculate minimum threshold (allow for chunking overhead)
+    min_expected = expected_count * 0.5  # At least 50% of raw docs
+    
+    # Reindex conditions:
+    # 1. Vector store is empty
+    # 2. Force reindex requested
+    # 3. Significant mismatch in document count (new data added)
+    should_reindex = (
+        current_count == 0 or 
+        force_reindex or 
+        current_count < min_expected
+    )
+    
+    if should_reindex:
+        if current_count > 0 and force_reindex:
             logger.info(
-                "Reindexing vector store",
+                "Force reindexing vector store",
                 current_count=current_count,
-                expected_count=expected_count
+                expected_documents=expected_count
+            )
+        elif current_count > 0:
+            logger.info(
+                "Reindexing due to document count mismatch",
+                current_count=current_count,
+                expected_documents=expected_count,
+                min_threshold=min_expected
             )
         else:
-            logger.info("Vector store empty, indexing legal data from JSON files...")
+            logger.info(
+                "Vector store empty, indexing all legal data...",
+                total_documents=expected_count
+            )
         
-        return service.index_documents(documents)
+        # Run indexing in a thread pool to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        indexed = await loop.run_in_executor(
+            None, 
+            lambda: service.index_documents(documents, batch_size=100)
+        )
+        
+        logger.info(
+            "Vector store indexing complete",
+            chunks_indexed=indexed,
+            source_documents=expected_count
+        )
+        
+        return indexed
     
     logger.info(
-        "Vector store already populated",
-        count=current_count,
-        expected=expected_count
+        "Vector store already populated with sufficient data",
+        current_chunks=current_count,
+        source_documents=expected_count
     )
     return 0

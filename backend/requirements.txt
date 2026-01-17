@@ -36,16 +36,16 @@ pydantic>=2.9.0
 pydantic-settings>=2.5.0
 
 # Authentication
-passlib[bcrypt]>=1.7.4
+argon2-cffi>=23.1.0
+bcrypt>=4.2.0
 pyjwt>=2.8.0
-python-jose[cryptography]>=3.3.0
 
 # Logging
 structlog>=24.0.0
 python-json-logger>=2.0.0
 
-# Web Search
-ddgs>=9.9.3
+# Web Search (DuckDuckGo - Free API)
+duckduckgo-search>=7.0.0
 
 # Tracing / OpenTelemetry
 opentelemetry-api>=1.25.0
@@ -54,9 +54,6 @@ opentelemetry-exporter-otlp-proto-http>=1.25.0
 opentelemetry-instrumentation-fastapi>=0.46b0
 opentelemetry-instrumentation-sqlalchemy>=0.46b0
 opentelemetry-instrumentation-httpx>=0.46b0
-
-# HTTP Client
-duckduckgo-search>=6.0.0
 
 # Caching & Rate Limiting
 redis>=5.0.0

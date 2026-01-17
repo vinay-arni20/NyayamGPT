@@ -99,12 +99,24 @@ async def chat(
                 if user_id and not existing_session.user_id:
                     await crud.associate_session_with_user(db, session_id, user_id)
                     logger.info(f"Associated anonymous session {session_id} with user {user_id}")
-                # If session belongs to another user, deny access
+                # If session belongs to another user, create a new session instead
                 elif existing_session.user_id and existing_session.user_id != user_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="You don't have access to this session"
+                    logger.warning(f"Session {session_id} belongs to another user, creating new session")
+                    session = await crud.create_chat_session(
+                        db=db,
+                        user_id=user_id,
+                        language=chat_request.language
                     )
+                    session_id = session.id
+            else:
+                # Session doesn't exist in database, create a new one
+                logger.info(f"Session {session_id} not found, creating new session")
+                session = await crud.create_chat_session(
+                    db=db,
+                    user_id=user_id,
+                    language=chat_request.language
+                )
+                session_id = session.id
         
         # Store user message
         await crud.create_chat_message(

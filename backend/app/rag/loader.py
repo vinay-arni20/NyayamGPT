@@ -275,6 +275,189 @@ class DocumentLoader:
             )
         
         return documents
+
+    def load_pdf_file(self, file_path: str, law_name: str = "") -> list[LegalDocument]:
+        """
+        Load documents from a PDF file with optimized parsing for Indian legal texts.
+        
+        Specifically optimized for:
+        - Bharatiya Nyaya Sanhita (BNS)
+        - Bharatiya Nagarik Suraksha Sanhita (BNSS)
+        - Bharatiya Sakshya Adhiniyam (BSA)
+        - Other Indian legal acts in standard format
+        
+        Args:
+            file_path: Path to PDF file
+            law_name: Name of the law (optional, inferred from filename if empty)
+            
+        Returns:
+            list[LegalDocument]: Parsed documents matching JSON structure
+        """
+        import pypdf
+        import re
+        
+        documents = []
+        if not law_name:
+            law_name = Path(file_path).stem.upper()
+        
+        # Law name mappings for official names
+        law_full_names = {
+            "BNS": "Bharatiya Nyaya Sanhita",
+            "BNSS": "Bharatiya Nagarik Suraksha Sanhita",
+            "BSA": "Bharatiya Sakshya Adhiniyam",
+        }
+        
+        # Base URLs for new codes
+        base_urls = {
+            "BNS": "https://www.indiacode.nic.in/handle/123456789/20086",
+            "BNSS": "https://www.indiacode.nic.in/handle/123456789/20087",
+            "BSA": "https://www.indiacode.nic.in/handle/123456789/20088",
+        }
+        
+        base_url = base_urls.get(law_name, "https://indiankanoon.org/search/")
+            
+        try:
+            reader = pypdf.PdfReader(file_path)
+            full_text = ""
+            
+            # Extract text from all pages with page tracking
+            for page_num, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    # Clean up common PDF extraction issues
+                    text = text.replace('\x00', '')  # Remove null bytes
+                    # Normalize horizontal whitespace only (preserve newlines for parsing)
+                    text = re.sub(r'[^\S\n]+', ' ', text)  # Multiple spaces/tabs -> single space
+                    text = re.sub(r' ?\n ?', '\n', text)  # Clean line breaks
+                    text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
+                    full_text += text + "\n"
+            
+            # Check for empty text (scanned PDF)
+            if not full_text.strip():
+                logger.warning(
+                    "PDF appears to be empty or scanned (no text extracted)",
+                    file=file_path
+                )
+                return []
+
+            # ============ BNS/BNSS/BSA SPECIFIC PARSING ============
+            # These 2023 codes have format: "58. TITLE IN ALL CAPS" at start of line
+            # Process line by line for accuracy
+            
+            section_pattern = re.compile(r'^(\d{1,3})\.\s+([A-Z][A-Z\s,\-–—\'\"()]+)')
+            chapter_pattern = re.compile(r'^CHAPTER\s+([IVXLCDM]+|\d+)')
+            
+            current_chapter = ""
+            current_chapter_title = ""
+            section_data = []  # List of (section_num, title, start_pos, chapter)
+            
+            lines = full_text.split('\n')
+            char_pos = 0
+            
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                
+                # Check for chapter
+                chapter_match = chapter_pattern.match(stripped)
+                if chapter_match:
+                    current_chapter = chapter_match.group(1)
+                    # Chapter title is often on next line
+                    if i + 1 < len(lines):
+                        next_line = lines[i + 1].strip()
+                        if next_line and not section_pattern.match(next_line) and len(next_line) < 100:
+                            current_chapter_title = next_line
+                
+                # Check for section (must start line with "N. TITLE")
+                section_match = section_pattern.match(stripped)
+                if section_match:
+                    section_num = section_match.group(1)
+                    title = section_match.group(2).strip()
+                    # Clean up title - remove trailing footnote numbers
+                    title = re.sub(r'\d{1,3}$', '', title).strip()
+                    title = re.sub(r'[.\s]+$', '', title)
+                    
+                    section_data.append({
+                        "section": section_num,
+                        "title": title,
+                        "start_pos": char_pos,
+                        "chapter": current_chapter,
+                        "chapter_title": current_chapter_title
+                    })
+                
+                char_pos += len(line) + 1  # +1 for newline
+            
+            # Now extract content for each section (from this section to next)
+            for i, sec in enumerate(section_data):
+                next_pos = section_data[i + 1]["start_pos"] if i + 1 < len(section_data) else len(full_text)
+                content = full_text[sec["start_pos"]:next_pos].strip()
+                
+                # Skip duplicate sections (keep first occurrence only)
+                if any(d.section == sec["section"] for d in documents):
+                    continue
+                
+                # Generate source URL
+                source_url = f"{base_url}?searchTerm=Section%20{sec['section']}"
+                
+                documents.append(LegalDocument(
+                    law_name=law_name,
+                    section=sec["section"],
+                    title=sec["title"],
+                    content=content,
+                    source_url=source_url,
+                    metadata={
+                        "source_type": "pdf",
+                        "chapter": sec["chapter"],
+                        "chapter_title": sec["chapter_title"]
+                    }
+                ))
+
+            # Fallback: If no sections found, split by paragraphs for chunking
+            if not documents and full_text.strip():
+                # Split into paragraph-sized chunks for better vector search
+                paragraphs = re.split(r'\n\s*\n', full_text.strip())
+                for idx, para in enumerate(paragraphs):
+                    para = para.strip()
+                    if len(para) > 50:  # Skip very short paragraphs
+                        documents.append(LegalDocument(
+                            law_name=law_name,
+                            section=f"Para-{idx+1}",
+                            title=f"{law_name} Paragraph {idx+1}",
+                            content=para,
+                            source_url=base_url,
+                            metadata={"source_type": "pdf", "fallback": True}
+                        ))
+                
+                logger.warning(
+                    "No sections found in PDF, using paragraph-based chunking",
+                    file=file_path,
+                    paragraphs=len(documents)
+                )
+            else:
+                # Count unique chapters
+                chapters = set(d.metadata.get("chapter", "") for d in documents if d.metadata.get("chapter"))
+                logger.info(
+                    "Loaded PDF documents with section parsing",
+                    file=file_path,
+                    law=law_name,
+                    sections_found=len(documents),
+                    chapters_found=len(chapters)
+                )
+            
+        except ImportError:
+            logger.error(
+                "pypdf not installed. Install with: pip install pypdf",
+                file=file_path
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to load PDF file",
+                file=file_path,
+                error=str(e),
+                error_type=type(e).__name__
+            )
+        
+        return documents
+
     
     def load_directory(self, directory: Optional[str] = None) -> list[LegalDocument]:
         """
@@ -305,6 +488,10 @@ class DocumentLoader:
                     # Try to infer law name from filename
                     law_name = file_path.stem.upper()
                     documents.extend(self.load_text_file(str(file_path), law_name))
+                elif ext == ".pdf":
+                    # Try to infer law name from filename
+                    law_name = file_path.stem.upper()
+                    documents.extend(self.load_pdf_file(str(file_path), law_name))
         
         logger.info(
             "Loaded documents from directory",
@@ -313,198 +500,6 @@ class DocumentLoader:
         )
         
         return documents
-
-
-# Sample data generator for testing
-def generate_sample_ipc_data() -> list[LegalDocument]:
-    """
-    Generate sample IPC (Indian Penal Code) data for testing.
-    
-    Returns:
-        list[LegalDocument]: Sample IPC sections
-    """
-    sample_sections = [
-        {
-            "section": "302",
-            "title": "Punishment for murder",
-            "content": """Whoever commits murder shall be punished with death, or imprisonment for life, and shall also be liable to fine.
-
-This section prescribes the punishment for the offence of murder as defined under Section 300. The punishment under this section is:
-1. Death penalty, or
-2. Imprisonment for life, and
-3. Fine (mandatory in both cases)
-
-The court has discretion to choose between death penalty and life imprisonment based on the facts and circumstances of each case. The Supreme Court has laid down that death penalty should be imposed only in the "rarest of rare cases.""",
-            "source_url": "https://indiankanoon.org/doc/1560742/"
-        },
-        {
-            "section": "304",
-            "title": "Punishment for culpable homicide not amounting to murder",
-            "content": """Whoever commits culpable homicide not amounting to murder shall be punished:
-
-Part I: If the act by which the death is caused is done with the intention of causing death, or of causing such bodily injury as is likely to cause death - with imprisonment for life, or imprisonment of either description for a term which may extend to ten years, and shall also be liable to fine.
-
-Part II: If the act is done with the knowledge that it is likely to cause death, but without any intention to cause death, or to cause such bodily injury as is likely to cause death - with imprisonment of either description for a term which may extend to ten years, or with fine, or with both.""",
-            "source_url": "https://indiankanoon.org/doc/409589/"
-        },
-        {
-            "section": "307",
-            "title": "Attempt to murder",
-            "content": """Whoever does any act with such intention or knowledge, and under such circumstances that, if he by that act caused death, he would be guilty of murder, shall be punished with imprisonment of either description for a term which may extend to ten years, and shall also be liable to fine.
-
-If hurt is caused to any person by such act, the offender shall be liable either to imprisonment for life, or to such punishment as is hereinbefore mentioned.
-
-When any person offending under this section is under sentence of imprisonment for life, he may, if hurt is caused, be punished with death.
-
-Essential ingredients:
-1. There must be an act done with intention or knowledge
-2. The act must be done under circumstances that if death had been caused, it would amount to murder
-3. Death should not have been caused""",
-            "source_url": "https://indiankanoon.org/doc/455468/"
-        },
-        {
-            "section": "376",
-            "title": "Punishment for rape",
-            "content": """Whoever commits rape shall be punished with rigorous imprisonment of either description for a term which shall not be less than ten years, but which may extend to imprisonment for life, and shall also be liable to fine.
-
-The punishment has been enhanced by the Criminal Law (Amendment) Act, 2013 following the Nirbhaya case. The minimum punishment is now 10 years (increased from 7 years).
-
-Aggravated forms of rape under Section 376(2) carry higher punishments:
-- Rape by police officer
-- Rape by public servant
-- Rape during communal violence
-- Rape of pregnant woman
-- Gang rape
-These may be punished with rigorous imprisonment for not less than 20 years extending to life imprisonment or death.""",
-            "source_url": "https://indiankanoon.org/doc/1279834/"
-        },
-        {
-            "section": "420",
-            "title": "Cheating and dishonestly inducing delivery of property",
-            "content": """Whoever cheats and thereby dishonestly induces the person deceived to deliver any property to any person, or to make, alter or destroy the whole or any part of a valuable security, or anything which is signed or sealed, and which is capable of being converted into a valuable security, shall be punished with imprisonment of either description for a term which may extend to seven years, and shall also be liable to fine.
-
-Essential ingredients:
-1. Cheating as defined under Section 415
-2. Dishonest inducement to deliver property
-3. Or to make/alter/destroy valuable security
-
-This is a cognizable, non-bailable, and compoundable offence. It is triable by a Magistrate of the First Class.""",
-            "source_url": "https://indiankanoon.org/doc/1306824/"
-        },
-        {
-            "section": "498A",
-            "title": "Husband or relative of husband of a woman subjecting her to cruelty",
-            "content": """Whoever, being the husband or the relative of the husband of a woman, subjects such woman to cruelty shall be punished with imprisonment for a term which may extend to three years and shall also be liable to fine.
-
-Explanation - For the purpose of this section, "cruelty" means:
-(a) any wilful conduct which is of such a nature as is likely to drive the woman to commit suicide or to cause grave injury or danger to life, limb or health (whether mental or physical) of the woman; or
-(b) harassment of the woman where such harassment is with a view to coercing her or any person related to her to meet any unlawful demand for any property or valuable security or is on account of failure by her or any person related to her to meet such demand.
-
-This is a cognizable and non-bailable offence. The offence is non-compoundable.""",
-            "source_url": "https://indiankanoon.org/doc/538436/"
-        }
-    ]
-    
-    return [
-        LegalDocument(
-            law_name="IPC",
-            section=s["section"],
-            title=s["title"],
-            content=s["content"],
-            source_url=s["source_url"]
-        )
-        for s in sample_sections
-    ]
-
-
-def generate_sample_crpc_data() -> list[LegalDocument]:
-    """
-    Generate sample CrPC (Code of Criminal Procedure) data for testing.
-    
-    Returns:
-        list[LegalDocument]: Sample CrPC sections
-    """
-    sample_sections = [
-        {
-            "section": "41",
-            "title": "When police may arrest without warrant",
-            "content": """Any police officer may without an order from a Magistrate and without a warrant, arrest any person:
-
-(a) who commits, in the presence of a police officer, a cognizable offence;
-(b) against whom a reasonable complaint has been made, or credible information has been received, or a reasonable suspicion exists that he has committed a cognizable offence punishable with imprisonment for a term which may be less than seven years or which may extend to seven years whether with or without fine, if the following conditions are satisfied:
-    (i) the police officer has reason to believe that such person has committed the said offence;
-    (ii) the police officer is satisfied that such arrest is necessary to prevent such person from committing any further offence; or for proper investigation of the offence; or to prevent tampering with evidence; or to prevent the person from making any inducement, threat or promise to any person acquainted with the facts of the case.
-
-The 2009 amendment introduced safeguards against arbitrary arrests.""",
-            "source_url": "https://indiankanoon.org/doc/1722440/"
-        },
-        {
-            "section": "154",
-            "title": "Information in cognizable cases (FIR)",
-            "content": """Every information relating to the commission of a cognizable offence, if given orally to an officer in charge of a police station, shall be reduced to writing by him or under his direction, and be read over to the informant; and every such information, whether given in writing or reduced to writing as aforesaid, shall be signed by the person giving it, and the substance thereof shall be entered in a book to be kept by such officer in such form as the State Government may prescribe in this behalf.
-
-A copy of the information as recorded shall be given forthwith, free of cost, to the informant.
-
-Key points:
-1. FIR must be registered for cognizable offences
-2. It should be in writing
-3. Must be signed by the informant
-4. Free copy must be provided to informant
-5. Police cannot refuse to register FIR for cognizable offence""",
-            "source_url": "https://indiankanoon.org/doc/1156070/"
-        },
-        {
-            "section": "161",
-            "title": "Examination of witnesses by police",
-            "content": """Any police officer making an investigation under this Chapter, or any police officer not below such rank as the State Government may, by general or special order, prescribe in this behalf, acting on the requisition of such officer, may examine orally any person supposed to be acquainted with the facts and circumstances of the case.
-
-Such person shall be bound to answer truly all questions relating to such case put to him by such officer, other than questions the answers to which would have a tendency to expose him to a criminal charge or to a penalty or forfeiture.
-
-The police officer may reduce into writing any statement made to him in the course of an examination under this section.
-
-Note: Statements made to police are not admissible as evidence under Section 162, except for contradiction purposes.""",
-            "source_url": "https://indiankanoon.org/doc/447673/"
-        },
-        {
-            "section": "437",
-            "title": "When bail may be taken in case of non-bailable offence",
-            "content": """When any person accused of, or suspected of, the commission of any non-bailable offence is arrested or detained without warrant by an officer in charge of a police station or appears or is brought before a Court other than the High Court or Court of Session, he may be released on bail:
-
-Provided that such person shall not be so released if there appear reasonable grounds for believing that he has been guilty of an offence punishable with death or imprisonment for life.
-
-Proviso further provides certain exceptions where bail may be granted:
-1. Person is under sixteen years of age
-2. Person is a woman
-3. Person is sick or infirm
-
-The court shall impose conditions it considers necessary to ensure the accused's appearance and to prevent tampering with evidence.""",
-            "source_url": "https://indiankanoon.org/doc/1704163/"
-        }
-    ]
-    
-    return [
-        LegalDocument(
-            law_name="CrPC",
-            section=s["section"],
-            title=s["title"],
-            content=s["content"],
-            source_url=s["source_url"]
-        )
-        for s in sample_sections
-    ]
-
-
-def get_all_sample_data() -> list[LegalDocument]:
-    """
-    Get all sample legal data.
-    
-    Returns:
-        list[LegalDocument]: All sample documents
-    """
-    documents = []
-    documents.extend(generate_sample_ipc_data())
-    documents.extend(generate_sample_crpc_data())
-    return documents
 
 
 def load_legal_json_files(data_dir: str = "./data") -> list[LegalDocument]:
@@ -532,21 +527,27 @@ def load_legal_json_files(data_dir: str = "./data") -> list[LegalDocument]:
     from pathlib import Path
     
     documents = []
+
     data_path = Path(data_dir)
     
-    # Map filenames to law names
+    # Map filenames to law names (includes new 2023 codes)
+    # Note: nia.json contains Negotiable Instruments Act, 1881 (not National Investigation Agency)
     law_name_map = {
-        "ipc.json": "IPC",
-        "crpc.json": "CrPC", 
-        "cpc.json": "CPC",
-        "hma.json": "Hindu Marriage Act",
-        "ida.json": "Industrial Disputes Act",
-        "iea.json": "Indian Evidence Act",
-        "mva.json": "Motor Vehicles Act",
-        "nia.json": "NIA Act",
+        "ipc.json": "IPC",  # Indian Penal Code, 1860 (Sections 1-511)
+        "crpc.json": "CrPC",  # Code of Criminal Procedure, 1973 (Sections 1-484)
+        "cpc.json": "CPC",  # Code of Civil Procedure, 1908 (Sections 1-158)
+        "hma.json": "Hindu Marriage Act",  # Hindu Marriage Act, 1955 (Sections 1-30)
+        "ida.json": "Industrial Disputes Act",  # Industrial Disputes Act, 1947 (Sections 1-40, amended to 62)
+        "iea.json": "Indian Evidence Act",  # Indian Evidence Act, 1872 (Sections 1-167)
+        "mva.json": "Motor Vehicles Act",  # Motor Vehicles Act, 1988 (Sections 1-217)
+        "nia.json": "Negotiable Instruments Act",  # Negotiable Instruments Act, 1881 (Sections 1-148)
+        # New 2023 Criminal Law Codes (replace IPC, CrPC, IEA)
+        "bns.json": "BNS",  # Bharatiya Nyaya Sanhita, 2023 (Sections 1-358, replaces IPC)
+        "bnss.json": "BNSS",  # Bharatiya Nagarik Suraksha Sanhita, 2023 (Sections 1-531, replaces CrPC)
+        "bsa.json": "BSA",  # Bharatiya Sakshya Adhiniyam, 2023 (Sections 1-170, replaces IEA)
     }
     
-    # Base URLs for each act
+    # Base URLs for each act (official India Code portal)
     base_urls = {
         "IPC": "https://www.indiacode.nic.in/handle/123456789/2263",
         "CrPC": "https://www.indiacode.nic.in/handle/123456789/1611",
@@ -555,7 +556,11 @@ def load_legal_json_files(data_dir: str = "./data") -> list[LegalDocument]:
         "Industrial Disputes Act": "https://www.indiacode.nic.in/handle/123456789/1459",
         "Indian Evidence Act": "https://www.indiacode.nic.in/handle/123456789/1364",
         "Motor Vehicles Act": "https://www.indiacode.nic.in/handle/123456789/1798",
-        "NIA Act": "https://www.indiacode.nic.in/handle/123456789/2037",
+        "Negotiable Instruments Act": "https://www.indiacode.nic.in/handle/123456789/2190",
+        # New 2023 Criminal Law Codes
+        "BNS": "https://www.indiacode.nic.in/handle/123456789/20086",
+        "BNSS": "https://www.indiacode.nic.in/handle/123456789/20087",
+        "BSA": "https://www.indiacode.nic.in/handle/123456789/20088",
     }
     
     if not data_path.exists():
@@ -645,19 +650,72 @@ def load_legal_json_files(data_dir: str = "./data") -> list[LegalDocument]:
 
 def get_all_legal_data(use_json_files: bool = True) -> list[LegalDocument]:
     """
-    Get all legal data - either from JSON files or sample data.
+    Get all legal data - from JSON files and PDFs in data directory.
+    
+    Loads all datasets for vector database indexing:
+    - JSON files: IPC, CrPC, CPC, HMA, IDA, IEA, MVA, NIA
+    - PDF files: BNS, BNSS, BSA (and any other PDFs)
     
     Args:
-        use_json_files: If True, load from JSON files in data/; 
-                        if False, use hardcoded sample data
+        use_json_files: If True, load from files in data/; 
+                        if False, return empty (no hardcoded data)
         
     Returns:
-        list[LegalDocument]: All legal documents
+        list[LegalDocument]: All legal documents ready for indexing
     """
-    if use_json_files:
-        documents = load_legal_json_files("./data")
-        if documents:
-            return documents
-        logger.warning("No JSON files found, falling back to sample data")
+    documents = []
+    stats = {"json": 0, "pdf": 0, "by_law": {}}
     
-    return get_all_sample_data()
+    if not use_json_files:
+        return documents
+    
+    # Load JSON files
+    json_docs = load_legal_json_files("./data")
+    documents.extend(json_docs)
+    stats["json"] = len(json_docs)
+    
+    # Load PDF files from the data directory
+    data_path = Path("./data")
+    if data_path.exists():
+        loader = DocumentLoader("./data")
+        for pdf_file in data_path.glob("*.pdf"):
+            try:
+                # Infer law name from filename (e.g. "BNS.pdf" -> "BNS")
+                law_name = pdf_file.stem.upper()
+                pdf_docs = loader.load_pdf_file(str(pdf_file), law_name)
+                documents.extend(pdf_docs)
+                stats["pdf"] += len(pdf_docs)
+                stats["by_law"][law_name] = len(pdf_docs)
+                logger.info(
+                    f"PDF loaded successfully",
+                    file=pdf_file.name,
+                    law=law_name,
+                    sections=len(pdf_docs)
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error loading PDF",
+                    file=pdf_file.name,
+                    error=str(e)
+                )
+    
+    # Count documents by law for JSON
+    for doc in json_docs:
+        if doc.law_name not in stats["by_law"]:
+            stats["by_law"][doc.law_name] = 0
+        stats["by_law"][doc.law_name] += 1
+    
+    if documents:
+        logger.info(
+            "All legal data loaded for vector indexing",
+            total_documents=len(documents),
+            json_sections=stats["json"],
+            pdf_sections=stats["pdf"],
+            laws_loaded=list(stats["by_law"].keys()),
+            breakdown=stats["by_law"]
+        )
+        return documents
+    
+    logger.warning("No legal documents found in data directory")
+    return []
+

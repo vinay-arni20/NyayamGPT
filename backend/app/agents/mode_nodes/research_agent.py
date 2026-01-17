@@ -237,7 +237,7 @@ async def validate_deep_research(
     # Check for minimum citations
     min_citations = validation_config.get("minimum_citations", 3)
     import re
-    citations = re.findall(r'Section \d+|Art(?:icle)? \d+|IPC|CrPC|CPC', response, re.IGNORECASE)
+    citations = re.findall(r'Section \d+|Art(?:icle)? \d+|BNS|BNSS|BSA|CPC|MVA|NIA|HMA|IDA', response, re.IGNORECASE)
     if len(set(citations)) < min_citations:
         issues.append(f"Insufficient citations - found {len(set(citations))}, need {min_citations}")
         # Don't fail for this, just note it

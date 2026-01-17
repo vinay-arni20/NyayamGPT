@@ -36,7 +36,7 @@ tracer = trace.get_tracer(__name__)
 async def health_check() -> HealthCheck:
     """
     Basic health check endpoint.
-    
+
     Returns minimal health information for load balancers
     and basic monitoring.
     """
@@ -58,37 +58,37 @@ async def health_check() -> HealthCheck:
 async def readiness_check() -> DetailedHealth:
     """
     Detailed readiness check.
-    
+
     Checks all system components and returns their status.
     Used by orchestrators to determine if the service can receive traffic.
     """
     span = trace.get_current_span()
     components = []
     overall_status = "healthy"
-    
+
     # Check database
     db_health = await _check_database()
     components.append(db_health)
     if db_health.status != "healthy":
         overall_status = "degraded"
-    
+
     # Check vector store
     vs_health = await _check_vector_store()
     components.append(vs_health)
     if vs_health.status != "healthy":
         overall_status = "degraded"
-    
+
     # Check Gemini API
     gemini_health = await _check_gemini()
     components.append(gemini_health)
     if gemini_health.status != "healthy":
         overall_status = "degraded"
-    
+
     span.set_attribute("overall_status", overall_status)
     span.set_attribute("components_count", len(components))
-    
+
     uptime = time.time() - _start_time
-    
+
     return DetailedHealth(
         status=overall_status,
         version=settings.app_version,
@@ -107,7 +107,7 @@ async def readiness_check() -> DetailedHealth:
 async def liveness_check(response: Response) -> dict:
     """
     Simple liveness check.
-    
+
     Returns 200 if the service is running.
     Used by orchestrators to detect hung processes.
     """
@@ -120,10 +120,10 @@ async def _check_database() -> ComponentHealth:
     try:
         from app.db.session import async_session_factory
         from sqlalchemy import text
-        
+
         async with async_session_factory() as session:
             await session.execute(text("SELECT 1"))
-        
+
         latency = (time.time() - start) * 1000
         return ComponentHealth(
             name="database",
@@ -145,10 +145,10 @@ async def _check_vector_store() -> ComponentHealth:
     start = time.time()
     try:
         from app.rag.vectorstore import get_default_vector_store
-        
+
         store = get_default_vector_store()
         stats = store.get_collection_stats()
-        
+
         latency = (time.time() - start) * 1000
         return ComponentHealth(
             name="vector_store",
@@ -170,11 +170,11 @@ async def _check_gemini() -> ComponentHealth:
     start = time.time()
     try:
         import google.generativeai as genai
-        
+
         # Quick API check
         genai.configure(api_key=settings.gemini_api_key)
         model = genai.GenerativeModel(settings.gemini_model)
-        
+
         # Just check if model is accessible (don't actually call it)
         latency = (time.time() - start) * 1000
         return ComponentHealth(

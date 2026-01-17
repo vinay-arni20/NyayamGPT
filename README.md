@@ -8,8 +8,9 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![React](https://img.shields.io/badge/React-18.3+-61dafb.svg)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
-[![Gemini](https://img.shields.io/badge/Gemini-2.5%20Flash-4285F4.svg)](https://ai.google.dev/)
+[![Gemini](https://img.shields.io/badge/Gemini-2.0%20Flash-4285F4.svg)](https://ai.google.dev/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-ff6f61.svg)](https://github.com/langchain-ai/langgraph)
+[![BNS](https://img.shields.io/badge/BNS%202023-Supported-green.svg)](#)
 
 [Quick Start](#installation--setup) • [Documentation](#architecture--tech-stack) • [Demo](#usage-guide) • [Contributing](#contributing)
 
@@ -46,9 +47,23 @@ NyayamGPT bridges this gap through:
 | **Hallucination Rate** | <2% | 10-20% |
 | **Citation Accuracy** | ≥95% | ~70% |
 | **Offline Capability** | ✅ Full | ❌ None |
-| **Multi-Language** | 8 Indian Languages | English Only |
+| **Multi-Language** | 11 Indian Languages | English Only |
+| **2023 Criminal Codes** | ✅ BNS, BNSS, BSA | ❌ Not Supported |
 | **Privacy** | Zero Data Storage | Cloud Storage |
 | **Verification Loop** | 3-Stage Validation | Single Pass |
+| **Cost** | 💚 100% Free APIs | 💰 Paid APIs |
+
+### 💚 Free APIs & Services
+NyayamGPT is built entirely on **free tier APIs** making it cost-effective to run:
+
+| Service | Provider | Cost | Rate Limit |
+|---------|----------|------|------------|
+| **LLM** | Google Gemini 2.0 Flash | Free | 15 RPM |
+| **Web Search** | DuckDuckGo | Free | Unlimited |
+| **Legal Search** | Indian Kanoon | Free (with fallback) | Varies |
+| **Embeddings** | HuggingFace (e5-base-v2) | Free/Local | N/A |
+| **Vector Store** | ChromaDB/FAISS | Free/Local | N/A |
+| **Database** | SQLite/PostgreSQL | Free/Self-hosted | N/A |
 
 ---
 
@@ -62,7 +77,7 @@ NyayamGPT bridges this gap through:
 - **Relevance Filtering**: Only uses documents with >30% relevance score
 
 ### Citation & Verification System
-- **Exact Section Citations**: Precise references to IPC, CrPC, CPC, and 8+ major acts
+- **Exact Section Citations**: Precise references to IPC, CrPC, CPC, BNS, BNSS, BSA, and 10+ major acts
 - **Indian Kanoon Integration**: Automatic resolution of citations to official URLs
 - **Official Source Priority**: indiacode.nic.in → legislative.gov.in → indiankanoon.org
 - **Citation Context**: Each citation includes usage context and relevance score
@@ -90,7 +105,7 @@ NyayamGPT bridges this gap through:
 
 ### Offline & Edge Deployment
 - **Local Vector Store**: Chroma/FAISS for offline document retrieval
-- **Embedded Legal Datasets**: Pre-indexed IPC, CrPC, CPC, MVA, IEA, HMA, IDA, NIA
+- **Embedded Legal Datasets**: Pre-indexed IPC, CrPC, CPC, MVA, IEA, HMA, IDA, NIA, BNS, BNSS, BSA
 - **Progressive Web App**: Frontend works offline with service workers
 - **Rural-Ready**: Optimized for low-bandwidth, intermittent connectivity
 
@@ -153,7 +168,7 @@ graph TB
     end
     
     subgraph "AI/ML Services"
-        F[Google Gemini 2.5 Flash]
+        F[Google Gemini 2.0 Flash - Free Tier]
         G[Sentence Transformers]
     end
     
@@ -197,64 +212,68 @@ graph TB
 
 ### Detailed LangGraph Agent Workflow
 
+The AI orchestration is powered by **LangGraph**, creating a stateful, cyclic workflow that mimics human legal reasoning.
+
 ```mermaid
 graph TD
     Start([User Query]) --> A[Classify Intent]
     
-    A -->|Legal Question| B{Needs Clarification?}
-    A -->|Drafting Request| C[Generate Document Template]
-    A -->|Out of Scope| D[Polite Refusal]
+    A -->|Clarify| B[Collect Missing Details]
+    A -->|Draft| C[Draft Document]
+    A -->|Continue| D[Rewrite Query]
     
-    B -->|Yes| E[Ask Clarifying Questions]
-    B -->|No| F[Rewrite Query]
-    
-    E --> End1([Return to User])
+    B --> End1([Return Clarification Q])
     C --> End2([Return Draft])
-    D --> End3([Return Refusal])
     
-    F --> G[Expand Query Multi-Aspect]
-    G --> H[Retrieve from Vector Store]
+    D --> E[Classify Query (Civil/Criminal)]
+    E --> F[Expand Query]
+    F --> G[Retrieve Docs]
     
-    H -->|Relevance < 0.3| I{Enable Web Search?}
-    H -->|Relevance >= 0.3| J[Draft Answer]
+    G --> H{Need Web Search?}
+    H -->|Yes| I[Search Case Law]
+    H -->|No| J[Draft Answer]
+    I --> J
     
-    I -->|User Approves| K[DuckDuckGo Search]
-    I -->|User Denies| L[Return Insufficient Data]
+    J --> K{Validate?}
+    K -->|Yes| L[Validate Answer]
+    K -->|No| M[Simplify Output]
     
-    K --> J
-    L --> End4([Return Message])
+    L --> N[Validate Severity]
+    N --> M
     
-    J --> M[Validate Answer]
+    M --> O[Extract Citations]
+    O --> P[Resolve Citations (URLs)]
+    P --> Q[Finalize Response]
     
-    M -->|Valid & Score >= Threshold| N[Extract Citations]
-    M -->|Invalid & Attempts < 3| O[Refine Answer]
-    M -->|Invalid & Attempts >= 3| P[Return Best Attempt]
+    Q --> End3([Return Final Answer])
     
-    O --> M
-    
-    N --> Q[Resolve Citations to URLs]
-    Q --> R[Simplify Legal Terms]
-    R --> S{Target Language}
-    
-    S -->|Non-English| T[Translate Response]
-    S -->|English| U[Finalize Response]
-    
-    T --> U
-    U --> End5([Return Final Answer])
-    
-    P --> End6([Return with Disclaimer])
-    
-    style Start fill:#4caf50
-    style End1 fill:#ff9800
-    style End2 fill:#4caf50
-    style End3 fill:#f44336
-    style End4 fill:#ff9800
-    style End5 fill:#4caf50
-    style End6 fill:#ff9800
-    style M fill:#2196f3
-    style J fill:#9c27b0
-    style Q fill:#00bcd4
+    style Start fill:#4caf50,color:white
+    style End1 fill:#ff9800,color:white
+    style End2 fill:#4caf50,color:white
+    style End3 fill:#4caf50,color:white
+    style L fill:#f44336,color:white
+    style N fill:#f44336,color:white
+    style J fill:#2196f3,color:white
 ```
+
+#### Workflow Steps:
+
+1.  **Intent Classification**: The system first determines if the user is asking a legal question, requesting a document draft, or if the query is ambiguous and needs clarification.
+2.  **Query Processing**:
+    *   **Rewrite**: The query is optimized for search (e.g., removing noise, expanding terms).
+    *   **Classify**: Determines if the matter is Civil or Criminal and its severity to constrain the search.
+    *   **Expand**: Generates related search terms to improve document recall.
+3.  **Retrieval (RAG)**:
+    *   **Local Search**: Searches the local vector database for relevant laws and sections.
+    *   **Web Search Fallback**: If local documents are insufficient (e.g., for recent case law), the system performs a targeted web search.
+4.  **Generation & Validation**:
+    *   **Drafting**: The LLM generates an initial answer based on the retrieved context.
+    *   **Validation Loop**: The answer is checked for hallucinations and accuracy. If issues are found, it can be regenerated.
+    *   **Severity Check**: Ensures the tone and content of the answer match the severity of the legal issue.
+5.  **Post-Processing**:
+    *   **Simplification**: Legal jargon is simplified into everyday language.
+    *   **Citation Resolution**: Citations are extracted and linked to official sources (India Code, Indian Kanoon).
+    *   **Finalization**: The response is formatted and returned to the user.
 
 ### Data Flow Architecture
 
@@ -266,7 +285,7 @@ sequenceDiagram
     participant Auth as Auth Service
     participant Agent as LangGraph Agent
     participant Cache as Redis
-    participant LLM as Gemini 2.5
+    participant LLM as Gemini 2.0 Flash
     participant VS as Vector Store
     participant IK as Indian Kanoon
     participant DB as Database
@@ -394,6 +413,8 @@ graph LR
         L[rag/vectorstore.py]
         M[auth/routes.py]
         N[core/config.py]
+        P1[agents/prompts.py]
+        P2[agents/types.py]
         
         H --> I
         H --> M
@@ -401,6 +422,8 @@ graph LR
         I --> J
         I --> K
         I --> L
+        J --> P1
+        J --> P2
     end
     
     subgraph "Shared Services"
@@ -435,11 +458,12 @@ graph LR
 #### AI/ML Stack
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| **Google Gemini** | 2.5 Flash | Primary reasoning LLM |
+| **Google Gemini** | 2.0 Flash (Free) | Primary reasoning LLM |
 | **ChromaDB** | 0.5+ | Vector database for semantic search |
 | **FAISS** | 1.8+ | Alternative vector store (offline mode) |
 | **Sentence Transformers** | 3.0+ | Local embeddings (intfloat/e5-base-v2) |
 | **HuggingFace Hub** | 0.24+ | Model downloads |
+| **DuckDuckGo Search** | 7.0+ | Free web search API |
 
 #### Infrastructure
 | Technology | Version | Purpose |
@@ -596,17 +620,23 @@ DATABASE_URL=sqlite+aiosqlite:///./data/nyayamgpt.db  # SQLite (dev)
 REDIS_URL=redis://localhost:6379/0
 ```
 
-#### AI/LLM Configuration
+#### AI/LLM Configuration (Free Tier)
 ```bash
-# Google Gemini (Required)
+# Google Gemini - All Free Tier Models
 GEMINI_API_KEY=your_primary_api_key
 GEMINI_FALLBACK_KEYS=key2,key3,key4          # Optional: Multiple keys for rotation
-GEMINI_MODEL=gemini-2.5-flash                # Primary model
-GEMINI_FALLBACK_MODELS=gemma-3-12b-it,gemini-2.0-flash-live
+GEMINI_MODEL=gemini-2.0-flash                # Primary model (best free model)
+GEMINI_FALLBACK_MODELS=gemini-1.5-flash,gemini-1.5-pro,gemini-2.0-flash-lite
 GEMINI_TEMPERATURE=0.1                       # Lower = more deterministic
 GEMINI_MAX_TOKENS=2048
 
-# Indian Kanoon API (Optional)
+# Free Tier Rate Limits:
+# - gemini-2.0-flash: 15 RPM
+# - gemini-1.5-flash: 15 RPM  
+# - gemini-1.5-pro: 2 RPM
+# - gemini-2.0-flash-lite: 30 RPM
+
+# Indian Kanoon API (Optional - works without token)
 INDIAN_KANOON_TOKEN=your_token_here
 ```
 
@@ -657,8 +687,12 @@ backend/data/
 ├── MVA.json          # Motor Vehicles Act
 ├── hma.json          # Hindu Marriage Act
 ├── ida.json          # Industrial Disputes Act
-└── nia.json          # National Investigation Agency Act
+├── nia.json          # National Investigation Agency Act
+├── BNS.pdf           # Bharatiya Nyaya Sanhita 2023 (auto-parsed)
+└── *.pdf             # Additional PDF files (auto-loaded)
 ```
+
+**New in v2.0**: PDF files are automatically parsed and indexed on startup. Place any legal PDF in the data folder and it will be included in the vector store.
 
 **To add custom datasets:**
 
@@ -826,14 +860,17 @@ print(f"Indexed {indexed} documents")
 
 | Act | Abbreviation | Sections | Status |
 |-----|--------------|----------|--------|
-| Indian Penal Code | IPC | 511 | ✅ Indexed |
-| Code of Criminal Procedure | CrPC | 484 | ✅ Indexed |
-| Code of Civil Procedure | CPC | 158 | ✅ Indexed |
-| Indian Evidence Act | IEA | 167 | ✅ Indexed |
-| Motor Vehicles Act | MVA | 217 | ✅ Indexed |
-| Hindu Marriage Act | HMA | 29 | ✅ Indexed |
-| Industrial Disputes Act | IDA | 40 | ✅ Indexed |
-| NIA Act | NIA | 46 | Indexed |
+| Indian Penal Code (1860) | IPC | 511 | ✅ Indexed |
+| Code of Criminal Procedure (1973) | CrPC | 484 | ✅ Indexed |
+| Code of Civil Procedure (1908) | CPC | 158 | ✅ Indexed |
+| Indian Evidence Act (1872) | IEA | 167 | ✅ Indexed |
+| Motor Vehicles Act (1988) | MVA | 217 | ✅ Indexed |
+| Hindu Marriage Act (1955) | HMA | 30 | ✅ Indexed |
+| Industrial Disputes Act (1947) | IDA | 40+ | ✅ Indexed |
+| Negotiable Instruments Act (1881) | NI Act | 148 | ✅ Indexed |
+| **Bharatiya Nyaya Sanhita (2023)** | BNS | 358 | ✅ PDF Indexed |
+| **Bharatiya Nagarik Suraksha Sanhita (2023)** | BNSS | 531 | 🔄 Pending |
+| **Bharatiya Sakshya Adhiniyam (2023)** | BSA | 170 | 🔄 Pending |
 
 ---
 
@@ -1318,7 +1355,7 @@ server {
 
 ### Completed Features
 - [x] Core RAG pipeline with LangGraph
-- [x] 8 major Indian acts indexed
+- [x] 11 major Indian acts indexed (including BNS, BNSS, BSA 2023)
 - [x] Multi-language support (11 languages)
 - [x] Citation verification system
 - [x] Offline mode with FAISS
@@ -1327,6 +1364,10 @@ server {
 - [x] OpenTelemetry tracing
 - [x] Legal term simplification
 - [x] Responsive React frontend
+- [x] PDF document parsing and auto-loading
+- [x] Modular prompt architecture (Google-level design)
+- [x] Centralized type definitions
+- [x] Mode-specific validation requirements
 
 ### In Progress
 - [ ] Voice input/output (Hindi & English)
@@ -1706,11 +1747,18 @@ If you find NyayamGPT helpful, please consider giving it a star on GitHub!
 
 ## Project Status
 
-**Current Version**: 1.0.0  
+**Current Version**: 2.0.0  
 **Status**: Production Ready  
-**Last Updated**: December 2024
+**Last Updated**: January 2026
 
 ### Recent Updates
+- **v2.0.0** (Jan 2026): Major Architecture Upgrade
+  - Google-level prompt engineering (modular, composable prompts)
+  - New types module for centralized type definitions
+  - Support for 2023 Criminal Law Codes (BNS, BNSS, BSA)
+  - Enhanced validation with mode-specific requirements
+  - Improved retry logic with exponential backoff
+  - PDF document loading support
 - **v1.0.0** (Dec 2024): Initial production release
   - 8 legal acts indexed
   - Multi-language support

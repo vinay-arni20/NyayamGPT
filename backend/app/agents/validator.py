@@ -263,7 +263,7 @@ class ValidatorAgent:
         citation_patterns = [
             r'Section \d+',
             r'Art(?:icle)? \d+',
-            r'IPC|CrPC|CPC|IEA|MVA|NIA|HMA',
+            r'BNS|BNSS|BSA|CPC|MVA|NIA|HMA|IDA',
             r'§\s*\d+',
         ]
         citations_found = set()

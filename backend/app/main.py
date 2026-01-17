@@ -27,10 +27,11 @@ from app.core.logging import (
 from app.core.tracing import setup_tracing
 from app.core.limiter import limiter
 from app.core.cache import get_cache_service, close_cache_service
-from app.db.session import init_db, close_db
+from app.db.session import DatabaseManager
 from app.rag.indexing import initialize_vector_store
-from app.api.routes import chat, health
+from app.api.routes import chat, health, documents
 from app.auth.routes import router as auth_router
+
 
 
 @asynccontextmanager
@@ -51,9 +52,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     
     # Setup tracing
     setup_tracing()
+    logger.info("Tracing setup complete")
     
     # Initialize database
-    await init_db()
+    logger.info("Initializing database...")
+    await DatabaseManager.initialize()
+    logger.info("Database initialized")
+    
+    # Database health check
+    db_health = await DatabaseManager.health_check()
+    if db_health["status"] == "healthy":
+        logger.info("Database connection healthy", **db_health)
+    else:
+        logger.warning("Database health check failed", **db_health)
     
     # Initialize cache
     cache = await get_cache_service()
@@ -62,11 +73,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     else:
         logger.warning("Cache service unavailable, running without caching")
     
-    # Initialize vector store with sample data if empty
+    # Initialize vector store in background to not block startup
     try:
-        indexed = await initialize_vector_store()
-        if indexed > 0:
-            logger.info(f"Indexed {indexed} documents into vector store")
+        # Run in background task
+        import asyncio
+        asyncio.create_task(initialize_vector_store())
+        logger.info("Vector store initialization started in background")
     except Exception as e:
         logger.warning(f"Vector store initialization warning: {e}")
     
@@ -77,7 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Shutdown
     logger.info("Shutting down NyayamGPT")
     await close_cache_service()
-    await close_db()
+    await DatabaseManager.shutdown()
     logger.info("NyayamGPT shutdown complete")
 
 
@@ -179,6 +191,8 @@ FastAPIInstrumentor.instrument_app(app)
 app.include_router(health.router)
 app.include_router(auth_router)
 app.include_router(chat.router)
+app.include_router(documents.router, prefix="/documents", tags=["Documents"])
+
 
 
 # =============================================================================

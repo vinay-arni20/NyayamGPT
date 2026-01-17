@@ -232,7 +232,7 @@ class ChromaVectorStore(VectorStoreBase):
     def search(
         self,
         query: str,
-        k: int = 5,
+        k: int = 10,
         filter_metadata: Optional[dict[str, Any]] = None
     ) -> list[SearchResult]:
         """
@@ -240,7 +240,7 @@ class ChromaVectorStore(VectorStoreBase):
         
         Args:
             query: Search query
-            k: Number of results to return
+            k: Number of results to return (default increased to 10 for better context)
             filter_metadata: Optional metadata filter
             
         Returns:

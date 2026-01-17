@@ -1,21 +1,30 @@
 """
-NyayamGPT - LangGraph Node Functions
-====================================
+NyayamGPT - LangGraph Node Functions (v2.0)
+============================================
 Individual node functions for the LangGraph workflow with tracing.
+
+Each node is a pure function that:
+- Takes GraphState as input
+- Returns updated GraphState
+- Has OpenTelemetry tracing
+- Handles errors gracefully
 """
 
-from typing import Any, TypedDict
+from typing import Any
 import traceback
 
 from opentelemetry import trace
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.agents.types import GraphState
 from app.agents.reasoning import (
     classify_intent,
     generate_clarification,
     rewrite_query,
     generate_draft_answer,
+    generate_constrained_answer,
+    validate_severity_match,
     simplify_answer,
     extract_citations,
     translate_query,
@@ -24,59 +33,20 @@ from app.agents.reasoning import (
 )
 from app.agents.validator import validate_and_refine
 from app.rag.vectorstore import search_vectorstore, SearchResult
+from app.agents.query_classifier import (
+    QueryClassifier, 
+    QueryClassification,
+    OffenseNature,
+    SeverityLevel,
+    build_vector_filter,
+    build_hybrid_search_query
+)
 
 # Get tracer for this module
 tracer = trace.get_tracer(__name__)
 
-
-class GraphState(TypedDict, total=False):
-    """
-    State object passed between LangGraph nodes.
-    
-    Attributes:
-        query: Original user query
-        clarified_query: Query after clarification/rewriting
-        intent: Classified intent of the query
-        needs_clarification: Whether clarification is needed
-        clarification_question: Question to ask for clarification
-        retrieved_docs: List of retrieved documents
-        context: Formatted context string from retrieved docs
-        draft_answer: Initial generated answer
-        final_answer: Final validated answer
-        citations: List of extracted citations
-        is_valid: Whether the answer passed validation
-        validation_attempts: Number of validation attempts used
-        issues: List of issues found during validation
-        error: Error message if any
-        language: Target language for response
-        mode: Response mode (normal, lawyer, qa, web, deep)
-        awaiting_search_approval: Whether waiting for user to approve internet search
-        search_approved: Whether user approved internet search
-    """
-    query: str
-    clarified_query: str
-    intent: str
-    intent_confidence: float
-    needs_clarification: bool
-    clarification_question: str
-    retrieved_docs: list[dict[str, Any]]
-    context: str
-    draft_answer: str
-    final_answer: str
-    citations: list[dict[str, Any]]
-    related_cases: list[dict[str, Any]]
-    is_valid: bool
-    validation_attempts: int
-    issues: list[str]
-    error: str
-    language: str
-    mode: str
-    original_query: str
-    awaiting_search_approval: bool
-    search_approved: bool
-    chat_history: list[dict[str, str]]
-    expanded_queries: list[str]
-    local_docs_sufficient: bool
+# Singleton query classifier
+_query_classifier = QueryClassifier()
 
 
 # Minimum relevance score threshold (0-1, higher = more relevant)
@@ -261,6 +231,92 @@ async def node_rewrite_query(state: GraphState) -> GraphState:
         }
 
 
+@tracer.start_as_current_span("node_classify_query_for_constrained_rag")
+def node_classify_query_for_constrained_rag(state: GraphState) -> GraphState:
+    """
+    Classify the query for constrained RAG retrieval.
+    
+    This node runs BEFORE retrieval to:
+    1. Determine offense type (verbal, physical, property, etc.)
+    2. Detect context (caste, minor, woman, death)
+    3. Build metadata filters for vector store
+    4. Enhance the query with relevant keywords
+    
+    CRITICAL: This prevents citing murder sections for verbal abuse cases!
+    """
+    span = trace.get_current_span()
+    query = state.get("clarified_query") or state["query"]
+    
+    try:
+        # Run classifier
+        classification = _query_classifier.classify(query)
+        
+        # Build vector store filter
+        vector_filter = build_vector_filter(classification)
+        
+        # Build enhanced query
+        enhanced_query = build_hybrid_search_query(query, classification)
+        
+        # Log classification for debugging
+        print(f"\n{'='*60}")
+        print(f"[QUERY CLASSIFIER] Constrained RAG Pre-processing")
+        print(f"{'='*60}")
+        print(f"  Query: {query}")
+        print(f"  Offense Nature: {classification.offense_nature.value}")
+        print(f"  Severity: {classification.severity_level.value}")
+        print(f"  Confidence: {classification.confidence:.0%}")
+        print(f"  Contexts: caste={classification.involves_caste}, death={classification.involves_death}, minor={classification.involves_minor}")
+        print(f"  Include Keywords: {classification.must_include_keywords}")
+        print(f"  Exclude Keywords: {classification.must_exclude_keywords}")
+        print(f"  Topics: {classification.topic_filters}")
+        print(f"  Vector Filter: {vector_filter}")
+        print(f"  Enhanced Query: {enhanced_query}")
+        print(f"  Reasoning: {classification.reasoning}")
+        print(f"{'='*60}\n")
+        
+        span.set_attribute("offense_nature", classification.offense_nature.value)
+        span.set_attribute("severity", classification.severity_level.value)
+        span.set_attribute("confidence", classification.confidence)
+        span.set_attribute("involves_caste", classification.involves_caste)
+        
+        logger.info(
+            "Query classified for constrained RAG",
+            offense_nature=classification.offense_nature.value,
+            severity=classification.severity_level.value,
+            confidence=classification.confidence
+        )
+        
+        return {
+            **state,
+            "query_classification": {
+                "offense_nature": classification.offense_nature.value,
+                "severity_level": classification.severity_level.value,
+                "involves_caste": classification.involves_caste,
+                "involves_domestic": classification.involves_domestic,
+                "involves_minor": classification.involves_minor,
+                "involves_woman": classification.involves_woman,
+                "involves_death": classification.involves_death,
+                "must_include_keywords": classification.must_include_keywords,
+                "must_exclude_keywords": classification.must_exclude_keywords,
+                "topic_filters": classification.topic_filters,
+                "confidence": classification.confidence,
+                "reasoning": classification.reasoning
+            },
+            "vector_filter": vector_filter,
+            "enhanced_query": enhanced_query
+        }
+        
+    except Exception as e:
+        span.set_attribute("error", True)
+        logger.error("Query classification failed", error=str(e))
+        # Proceed without classification - no filtering
+        return {
+            **state,
+            "query_classification": None,
+            "vector_filter": {},
+            "enhanced_query": query
+        }
+
 
 @tracer.start_as_current_span("node_expand_query")
 async def node_expand_query(state: GraphState) -> GraphState:
@@ -289,19 +345,37 @@ async def node_expand_query(state: GraphState) -> GraphState:
 @tracer.start_as_current_span("node_retrieve_docs")
 def node_retrieve_docs(state: GraphState) -> GraphState:
     """
-    Retrieve relevant legal documents from vector store.
+    Retrieve relevant legal documents from vector store with CONSTRAINED RAG filtering.
+    
+    Uses pre-computed classification to:
+    1. Apply metadata filters (e.g., exclude physical harm sections for verbal offenses)
+    2. Use enhanced query with relevant keywords
+    3. Post-filter results based on classification constraints
     """
     span = trace.get_current_span()
     query = state.get("clarified_query") or state["query"]
     expanded_queries = state.get("expanded_queries", [query])
     
+    # Get classification-based filters from previous node
+    vector_filter = state.get("vector_filter", {})
+    enhanced_query = state.get("enhanced_query", query)
+    classification = state.get("query_classification", {})
+    
+    # Get exclusion keywords for post-filtering
+    must_exclude = classification.get("must_exclude_keywords", []) if classification else []
+    
     try:
         all_docs = []
         seen_ids = set()
         
-        # Search for each query
-        for q in expanded_queries:
-            docs = search_vectorstore(q, k=settings.retrieval_top_k)
+        # Use enhanced query if available, plus original expanded queries
+        search_queries = [enhanced_query] if enhanced_query != query else []
+        search_queries.extend(expanded_queries)
+        
+        # Search for each query WITH metadata filtering
+        for q in search_queries:
+            # Apply vector store metadata filter
+            docs = search_vectorstore(q, k=settings.retrieval_top_k, filter_metadata=vector_filter if vector_filter else None)
             for doc in docs:
                 # Deduplicate
                 doc_id = f"{doc.metadata.law}-{doc.metadata.section}"
@@ -313,28 +387,50 @@ def node_retrieve_docs(state: GraphState) -> GraphState:
         all_docs.sort(key=lambda x: x.score, reverse=True)
         docs = all_docs[:settings.retrieval_top_k]
         
+        # POST-FILTERING: Apply keyword exclusions from classification
+        # This catches cases where metadata filtering wasn't enough
+        if must_exclude:
+            filtered_docs = []
+            for doc in docs:
+                # Check if document contains exclusion keywords
+                doc_text_lower = (doc.text + " " + doc.metadata.title).lower()
+                should_exclude = any(kw.lower() in doc_text_lower for kw in must_exclude)
+                
+                if not should_exclude:
+                    filtered_docs.append(doc)
+                else:
+                    print(f"  [CONSTRAINED RAG] EXCLUDED: {doc.metadata.law} {doc.metadata.section} (contains excluded term)")
+            
+            docs = filtered_docs
+        
         # Log retrieved documents with scores for debugging
-        print(f"\n[RETRIEVAL] Query: {query}")
-        print(f"[RETRIEVAL] Found {len(docs)} documents:")
-        for i, doc in enumerate(docs):
-            print(f"  [{i+1}] Score: {doc.score:.3f} | {doc.metadata.law} {doc.metadata.section}: {doc.metadata.title[:50]}...")
+        print(f"\n[CONSTRAINED RAG RETRIEVAL]")
+        print(f"  Query: {query}")
+        print(f"  Enhanced Query: {enhanced_query}")
+        print(f"  Metadata Filter: {vector_filter}")
+        print(f"  Exclusion Keywords: {must_exclude}")
+        print(f"  Results after filtering: {len(docs)} documents:")
+        for i, doc in enumerate(docs[:5]):  # Show top 5
+            print(f"    [{i+1}] Score: {doc.score:.3f} | {doc.metadata.law} {doc.metadata.section}: {doc.metadata.title[:50]}...")
         
         # Filter by relevance score
         relevant_docs = [doc for doc in docs if doc.score >= MIN_RELEVANCE_SCORE]
-        print(f"[RETRIEVAL] After filtering (>={MIN_RELEVANCE_SCORE}): {len(relevant_docs)} documents\n")
+        print(f"  After relevance filtering (>={MIN_RELEVANCE_SCORE}): {len(relevant_docs)} documents\n")
         
         span.set_attribute("docs_retrieved", len(docs))
         span.set_attribute("docs_relevant", len(relevant_docs))
         span.set_attribute("query_used", query[:100])
+        span.set_attribute("filter_applied", bool(vector_filter))
         
         # Format context
         context = _format_docs_as_context(docs)
         docs_list = _docs_to_dict_list(docs)
         
         logger.info(
-            "Documents retrieved",
+            "Constrained RAG retrieval completed",
             count=len(docs),
             relevant=len(relevant_docs),
+            filter_applied=bool(vector_filter),
             query=query[:50]
         )
         
@@ -417,12 +513,16 @@ async def node_search_case_law(state: GraphState) -> GraphState:
 async def node_draft_answer(state: GraphState) -> GraphState:
     """
     Generate initial draft answer based on retrieved documents.
+    
+    CONSTRAINED RAG: Uses pre-computed classification to generate
+    a constrained answer that matches the offense type/severity.
     """
     span = trace.get_current_span()
     query = state["query"]
     context = state.get("context", "")
     language = state.get("language", "English")
     related_cases = state.get("related_cases", [])
+    classification = state.get("query_classification", None)
     
     try:
         # Check if we have any context (local or web)
@@ -452,16 +552,35 @@ async def node_draft_answer(state: GraphState) -> GraphState:
             
         full_context = context + cases_context
         
-        draft = await generate_draft_answer(
-            query, 
-            full_context, 
-            language,
-            chat_history=state.get("chat_history")
-        )
+        # Use CONSTRAINED generation if classification available
+        if classification and classification.get("offense_nature") != "unknown":
+            print(f"\n[CONSTRAINED RAG] Using constrained generation")
+            print(f"  Offense Nature: {classification.get('offense_nature')}")
+            print(f"  Severity: {classification.get('severity_level')}")
+            print(f"  Involves Caste: {classification.get('involves_caste')}")
+            
+            draft = await generate_constrained_answer(
+                query=query,
+                context=full_context,
+                classification=classification,
+                language=language,
+                chat_history=state.get("chat_history")
+            )
+            span.set_attribute("constrained_generation", True)
+        else:
+            # Fallback to standard generation
+            print(f"\n[STANDARD RAG] Using standard generation (no classification)")
+            draft = await generate_draft_answer(
+                query, 
+                full_context, 
+                language,
+                chat_history=state.get("chat_history")
+            )
+            span.set_attribute("constrained_generation", False)
         
         span.set_attribute("draft_length", len(draft))
         
-        logger.info("Draft answer generated", length=len(draft))
+        logger.info("Draft answer generated", length=len(draft), constrained=bool(classification))
         
         return {
             **state,
@@ -475,7 +594,7 @@ async def node_draft_answer(state: GraphState) -> GraphState:
         logger.error("Draft generation failed", error=str(e))
         return {
             **state,
-            "draft_answer": "I apologize, but I encountered an error generating a response.",
+            "draft_answer": "**Unable to process this request.** Please try rephrasing your question or try again in a moment.",
             "error": str(e)
         }
 
@@ -558,6 +677,87 @@ async def node_validate_answer(state: GraphState) -> GraphState:
             "final_answer": draft,
             "is_valid": False,
             "error": str(e)
+        }
+
+
+@tracer.start_as_current_span("node_validate_severity")
+async def node_validate_severity(state: GraphState) -> GraphState:
+    """
+    Validate that response severity matches the classified offense severity.
+    
+    CRITICAL: This catches hallucinations where inappropriate sections are cited.
+    Example: Citing BNS Section 103 (Murder) for a verbal abuse case.
+    
+    If severity mismatch is detected, adds a warning to the response.
+    """
+    span = trace.get_current_span()
+    
+    query = state["query"]
+    answer = state.get("final_answer", state.get("draft_answer", ""))
+    classification = state.get("query_classification", None)
+    
+    # Skip if no classification or already failed validation
+    if not classification or not answer:
+        return state
+    
+    try:
+        # Run severity validation
+        result = await validate_severity_match(
+            query=query,
+            response=answer,
+            classification=classification
+        )
+        
+        severity_match = result.get("severity_match", True)
+        escalation_detected = result.get("escalation_detected", False)
+        problematic_sections = result.get("problematic_sections", [])
+        
+        print(f"\n[SEVERITY VALIDATION]")
+        print(f"  Severity Match: {severity_match}")
+        print(f"  Escalation Detected: {escalation_detected}")
+        print(f"  Problematic Sections: {problematic_sections}")
+        
+        span.set_attribute("severity_match", severity_match)
+        span.set_attribute("escalation_detected", escalation_detected)
+        
+        if escalation_detected and problematic_sections:
+            # Add warning to the answer
+            warning = (
+                f"\n\n⚠️ **Note:** This response may contain sections that don't match "
+                f"the severity of your query ({classification.get('offense_nature')} offense, "
+                f"{classification.get('severity_level')} severity). "
+                f"Please verify the cited sections carefully."
+            )
+            
+            logger.warning(
+                "Severity escalation detected",
+                offense_nature=classification.get("offense_nature"),
+                problematic_sections=problematic_sections
+            )
+            
+            return {
+                **state,
+                "final_answer": answer + warning,
+                "severity_validated": False,
+                "severity_issues": problematic_sections
+            }
+        
+        logger.info("Severity validation passed")
+        
+        return {
+            **state,
+            "severity_validated": True,
+            "severity_issues": []
+        }
+        
+    except Exception as e:
+        span.set_attribute("error", True)
+        logger.error("Severity validation failed", error=str(e))
+        # Don't block if validation fails
+        return {
+            **state,
+            "severity_validated": None,
+            "severity_issues": []
         }
 
 
@@ -734,9 +934,9 @@ def node_finalize_response(state: GraphState) -> GraphState:
         
         # Add the "Understanding" section ONLY if language is English
         # For other languages, we skip this to avoid mixed-language output
-        if state.get("language", "English") == "English":
-            preamble = f"I interpreted your question as \"{display_query}\".\n\n"
-            final_answer = preamble + final_answer.lstrip()
+        # if state.get("language", "English") == "English":
+        #     preamble = f"I interpreted your question as \"{display_query}\".\n\n"
+        #     final_answer = preamble + final_answer.lstrip()
 
     # Log final state
     span.set_attribute("final_answer_length", len(final_answer))

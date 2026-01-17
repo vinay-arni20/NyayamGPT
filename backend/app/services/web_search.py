@@ -1,7 +1,7 @@
 """
 NyayamGPT - Web Search Service
 ==============================
-Service for searching trusted legal websites using DuckDuckGo.
+Service for searching trusted legal websites using DuckDuckGo (Free API).
 """
 
 import warnings
@@ -9,9 +9,6 @@ from typing import Any, List, Optional
 from ddgs import DDGS
 from opentelemetry import trace
 from app.core.logging import logger
-
-# Suppress the specific RuntimeWarning from duckduckgo_search
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="duckduckgo_search")
 
 # Get tracer for this module
 tracer = trace.get_tracer(__name__)

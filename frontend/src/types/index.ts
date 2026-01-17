@@ -52,7 +52,7 @@ export interface AuthError {
 // ============================================================================
 
 export interface Citation {
-  act: string        // Act name (IPC, CrPC, etc.)
+  act: string        // Act name (IPC, CrPC, BNS, BNSS, BSA, etc.)
   law?: string       // Alias for act (backwards compatibility)
   section: string    // Section number
   title?: string     // Section title
@@ -60,6 +60,8 @@ export interface Citation {
   context?: string   // Usage context
   verified: boolean  // Whether URL is from official source
   excerpt?: string   // Legacy field for backwards compatibility
+  chapter?: string   // Chapter reference (new in v2.0)
+  source_url?: string // Alias for url (backend compatibility)
 }
 
 export interface ChatMessage {

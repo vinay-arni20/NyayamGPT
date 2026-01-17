@@ -1,5 +1,6 @@
 """NyayamGPT API Routes"""
 
-from app.api.routes import chat, health
+from app.api.routes import chat, health, documents
 
-__all__ = ["chat", "health"]
+__all__ = ["chat", "health", "documents"]
+

@@ -7,14 +7,15 @@ import type { ChatRequest, ChatResponse, HealthStatus, ApiError, SessionResponse
 // Use environment variable or default to localhost backend
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Token storage keys (same as auth.ts)
-const ACCESS_TOKEN_KEY = 'nyayamgpt_access_token';
+// Token storage keys (must match auth.ts)
+const ACCESS_TOKEN_KEY = 'nyayam_access_token';
 
 class ApiClient {
   private baseUrl: string
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl
+    console.log('API Client initialized with URL:', this.baseUrl);
   }
 
   private getAuthHeaders(): Record<string, string> {

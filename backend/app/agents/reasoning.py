@@ -1,18 +1,26 @@
 """
-NyayamGPT - Reasoning Module
-============================
-Gemini API integration for LLM-powered reasoning with OpenTelemetry tracing.
+NyayamGPT - Reasoning Module (v2.0)
+===================================
+Production-grade Gemini API integration with OpenTelemetry tracing.
+
+Architecture follows Google/Anthropic best practices:
+- Service layer abstraction
+- Retry logic with exponential backoff
+- Structured JSON parsing with validation
+- Context window optimization
+- Comprehensive tracing
 """
 
 import json
 import time
 import asyncio
 from collections import deque
-from typing import Any, Optional, TypeVar, Type
+from functools import wraps
+from typing import Any, Callable, Optional, TypeVar, Type, Union
 
 import google.generativeai as genai
 from opentelemetry import trace
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -24,16 +32,40 @@ tracer = trace.get_tracer(__name__)
 # Type variable for generic response parsing
 T = TypeVar("T", bound=BaseModel)
 
+# Constants
+MAX_CONTEXT_CHARS = 15000
+MAX_RETRY_ATTEMPTS = 3
+RETRY_BASE_DELAY = 0.5
+
 
 def escape_braces(text: str) -> str:
-    """Escape curly braces in text to prevent format() errors."""
+    """
+    Escape curly braces in text to prevent format() errors.
+    
+    This is critical for preventing injection attacks and format string errors
+    when user input contains { or } characters.
+    """
     if not text:
         return ""
     return text.replace("{", "{{").replace("}", "}}")
 
 
-def truncate_context(text: str, max_chars: int = 15000) -> str:
-    """Truncate context intelligently to reduce input tokens while keeping key info."""
+def truncate_context(text: str, max_chars: int = MAX_CONTEXT_CHARS) -> str:
+    """
+    Truncate context intelligently to reduce input tokens while preserving key info.
+    
+    Strategy:
+    - Keep 60% from the beginning (usually contains definitions/key info)
+    - Keep 40% from the end (usually contains conclusions/penalties)
+    - Add a clear truncation marker
+    
+    Args:
+        text: The context text to truncate
+        max_chars: Maximum characters to keep
+        
+    Returns:
+        Truncated text with marker if shortened
+    """
     if not text or len(text) <= max_chars:
         return text
     
@@ -42,6 +74,35 @@ def truncate_context(text: str, max_chars: int = 15000) -> str:
     last_part = max_chars - first_part
     
     return text[:first_part] + "\n\n[...context truncated for optimization...]\n\n" + text[-last_part:]
+
+
+def with_retry(max_attempts: int = MAX_RETRY_ATTEMPTS, base_delay: float = RETRY_BASE_DELAY):
+    """
+    Decorator for retry logic with exponential backoff.
+    
+    Args:
+        max_attempts: Maximum number of retry attempts
+        base_delay: Base delay between retries (doubles each attempt)
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_attempts):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_attempts - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(
+                            f"Attempt {attempt + 1}/{max_attempts} failed for {func.__name__}: {e}. "
+                            f"Retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 class GeminiService:
@@ -549,3 +610,123 @@ async def extract_citations(text: str) -> list[dict[str, Any]]:
         return result["citations"]
     else:
         return []
+
+
+@tracer.start_as_current_span("generate_constrained_answer")
+async def generate_constrained_answer(
+    query: str, 
+    context: str, 
+    classification: dict,
+    language: str = "English", 
+    chat_history: list[dict[str, str]] = None
+) -> str:
+    """
+    Generate a CONSTRAINED legal answer using pre-computed classification.
+    
+    This function uses the CONSTRAINED_RAG_ANSWER_PROMPT which:
+    1. Includes pre-computed offense classification
+    2. Enforces strict section matching rules
+    3. Prevents severity/type mismatches (e.g., citing murder for insults)
+    
+    Args:
+        query: User's query
+        context: Retrieved legal documents (already filtered)
+        classification: Pre-computed query classification dict
+        language: Target language for the response
+        chat_history: Previous conversation history
+        
+    Returns:
+        str: Constrained draft answer
+    """
+    from app.agents.prompts import CONSTRAINED_RAG_ANSWER_PROMPT, SYSTEM_PROMPT
+    
+    span = trace.get_current_span()
+    span.set_attribute("context_length", len(context))
+    span.set_attribute("language", language)
+    span.set_attribute("offense_nature", classification.get("offense_nature", "unknown"))
+    
+    # Truncate context to reduce input tokens
+    context = truncate_context(context, max_chars=15000)
+    span.set_attribute("truncated_context_length", len(context))
+    
+    # Format chat history (only last 3 messages)
+    history_text = ""
+    if chat_history:
+        history_text = "\n\nChat History:\n" + "\n".join(
+            [f"{msg['role'].title()}: {msg['content']}" for msg in chat_history[-3:]]
+        )
+    
+    # Extract classification fields
+    offense_nature = classification.get("offense_nature", "unknown")
+    severity_level = classification.get("severity_level", "unknown")
+    involves_caste = classification.get("involves_caste", False)
+    involves_physical = classification.get("involves_physical", False) or classification.get("involves_death", False)
+    involves_minor = classification.get("involves_minor", False)
+    
+    logger.info(
+        "Generating constrained answer",
+        offense_nature=offense_nature,
+        severity=severity_level,
+        involves_caste=involves_caste
+    )
+    
+    return await gemini_generate(
+        SYSTEM_PROMPT,
+        CONSTRAINED_RAG_ANSWER_PROMPT.format(
+            query=escape_braces(query),
+            context=escape_braces(context + history_text),
+            language=escape_braces(language),
+            offense_nature=escape_braces(offense_nature),
+            severity_level=escape_braces(severity_level),
+            involves_caste="Yes" if involves_caste else "No",
+            involves_physical="Yes" if involves_physical else "No",
+            involves_minor="Yes" if involves_minor else "No",
+        ),
+        use_cache=True
+    )
+
+
+@tracer.start_as_current_span("validate_severity_match")
+async def validate_severity_match(
+    query: str,
+    response: str,
+    classification: dict
+) -> dict[str, Any]:
+    """
+    Validate that the response severity matches the classified offense severity.
+    
+    This catches hallucinations where the LLM cites inappropriate sections
+    (e.g., murder sections for verbal abuse cases).
+    
+    Args:
+        query: Original user query
+        response: Generated response to validate
+        classification: Pre-computed query classification
+        
+    Returns:
+        dict: Validation result with severity_match, escalation_detected, etc.
+    """
+    from app.agents.prompts import OFFENSE_SEVERITY_VALIDATION_PROMPT
+    
+    span = trace.get_current_span()
+    
+    offense_nature = classification.get("offense_nature", "unknown")
+    severity_level = classification.get("severity_level", "unknown")
+    
+    result = await gemini_generate(
+        "Validate response severity matches offense classification.",
+        OFFENSE_SEVERITY_VALIDATION_PROMPT.format(
+            query=escape_braces(query),
+            response=escape_braces(response),
+            offense_nature=escape_braces(offense_nature),
+            severity_level=escape_braces(severity_level)
+        ),
+        json_output=True,
+        use_cache=True
+    )
+    
+    if isinstance(result, dict):
+        span.set_attribute("severity_match", result.get("severity_match", False))
+        span.set_attribute("escalation_detected", result.get("escalation_detected", False))
+    
+    return result

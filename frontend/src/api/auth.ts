@@ -20,6 +20,7 @@ class AuthApiClient {
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
+    console.log('Auth Client initialized with URL:', this.baseUrl);
   }
 
   // Token management
@@ -135,7 +136,13 @@ class AuthApiClient {
 
   async logout(): Promise<void> {
     try {
-      await this.request('/auth/logout', { method: 'POST' }, true);
+      const refreshToken = this.getRefreshToken();
+      if (refreshToken) {
+        await this.request('/auth/logout', { 
+          method: 'POST',
+          body: JSON.stringify({ refresh_token: refreshToken })
+        }, true);
+      }
     } catch {
       // Ignore logout errors
     } finally {

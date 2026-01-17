@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     
     # Application
     app_name: str = Field(default="NyayamGPT", description="Application name")
-    app_version: str = Field(default="1.0.0", description="Application version")
+    app_version: str = Field(default="2.0.0", description="Application version")
     debug: bool = Field(default=False, description="Debug mode")
     environment: Literal["development", "staging", "production"] = Field(
         default="development", 
@@ -151,14 +151,14 @@ class Settings(BaseSettings):
         description="Overlap between chunks"
     )
     
-    # Gemini Model Settings
+    # Gemini Model Settings (Free Tier Models)
     gemini_model: str = Field(
-        default="gemini-2.5-flash",
-        description="Gemini model to use"
+        default="gemini-2.0-flash",
+        description="Primary Gemini model - gemini-2.0-flash is the best free model"
     )
     gemini_fallback_models: str = Field(
-        default="gemma-3-12b-it,gemini-2.0-flash-live",
-        description="Comma-separated list of fallback Gemini models"
+        default="gemini-1.5-flash,gemini-1.5-pro,gemini-2.0-flash-lite",
+        description="Comma-separated list of fallback Gemini models (all free tier)"
     )
     gemini_temperature: float = Field(
         default=0.1,

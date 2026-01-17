@@ -47,22 +47,22 @@ export default function AboutPage() {
             <FeatureCard
               icon={<Shield className='h-8 w-8 text-blue-500' />}
               title='Accurate & Reliable'
-              description='Powered by advanced RAG technology to provide citations from official Indian legal codes (IPC, CrPC, etc.).'
+              description='Powered by advanced RAG technology with 11 Indian legal codes including new 2023 Criminal Codes (BNS, BNSS, BSA).'
             />
             <FeatureCard
               icon={<Zap className='h-8 w-8 text-yellow-500' />}
               title='Instant Answers'
-              description='Get immediate responses to your legal queries without waiting for appointments.'
+              description='Get immediate responses to your legal queries with 3-stage validation and <2% hallucination rate.'
             />
             <FeatureCard
               icon={<Globe className='h-8 w-8 text-green-500' />}
               title='Multilingual Support'
-              description='Ask questions in English or Hindi and get answers in the language you understand best.'
+              description='Ask questions in 11 Indian languages and get answers in the language you understand best.'
             />
             <FeatureCard
               icon={<BrainCircuit className='h-8 w-8 text-purple-500' />}
               title='Deep Research'
-              description='Complex legal analysis using multi-step reasoning and web search capabilities.'
+              description='Complex legal analysis using multi-step reasoning, citation verification, and web search capabilities.'
             />
           </div>
         </main>

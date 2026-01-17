@@ -1,7 +1,13 @@
 """
-NyayamGPT - LangGraph Workflow
-==============================
+NyayamGPT - LangGraph Workflow (v2.0)
+=====================================
 Main LangGraph workflow definition with conditional routing and tracing.
+
+Architecture:
+    1. Intent Classification → Clarification check
+    2. Query Processing → Rewrite → Expand → Retrieve
+    3. Answer Generation → Validation loop → Simplification
+    4. Citation extraction → URL resolution → Finalization
 """
 
 import time
@@ -12,17 +18,19 @@ from opentelemetry import trace
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.agents.types import GraphState
 from app.agents.nodes import (
-    GraphState,
     node_classify_intent,
     node_collect_missing_details,
     node_rewrite_query,
+    node_classify_query_for_constrained_rag,
     node_expand_query,
     node_retrieve_docs,
     node_search_case_law,
     node_draft_answer,
     node_draft_document,
     node_validate_answer,
+    node_validate_severity,
     node_simplify_output,
     node_extract_citations,
     node_resolve_citations,
@@ -60,11 +68,13 @@ def create_legal_assistant_graph() -> StateGraph:
     workflow.add_node("classify_intent", node_classify_intent)
     workflow.add_node("collect_missing_details", node_collect_missing_details)
     workflow.add_node("rewrite_query", node_rewrite_query)
+    workflow.add_node("classify_query", node_classify_query_for_constrained_rag)  # NEW: Constrained RAG
     workflow.add_node("expand_query", node_expand_query)
     workflow.add_node("retrieve_docs", node_retrieve_docs)
     workflow.add_node("draft_answer", node_draft_answer)
     workflow.add_node("draft_document", node_draft_document)
     workflow.add_node("validate_answer", node_validate_answer)
+    workflow.add_node("validate_severity", node_validate_severity)  # NEW: Severity validation
     workflow.add_node("simplify_output", node_simplify_output)
     workflow.add_node("extract_citations", node_extract_citations)
     workflow.add_node("resolve_citations", node_resolve_citations)  # NEW: Internet URL lookup
@@ -93,7 +103,8 @@ def create_legal_assistant_graph() -> StateGraph:
     # Main processing path
     workflow.add_node("search_case_law", node_search_case_law)
     
-    workflow.add_edge("rewrite_query", "expand_query")
+    workflow.add_edge("rewrite_query", "classify_query")      # NEW: Classify before expand
+    workflow.add_edge("classify_query", "expand_query")       # Then expand
     workflow.add_edge("expand_query", "retrieve_docs")
     
     # Conditional Web Search (Stage 2 Fallback)
@@ -118,7 +129,8 @@ def create_legal_assistant_graph() -> StateGraph:
         }
     )
     
-    workflow.add_edge("validate_answer", "simplify_output")
+    workflow.add_edge("validate_answer", "validate_severity")  # NEW: Check severity match
+    workflow.add_edge("validate_severity", "simplify_output")
     workflow.add_edge("simplify_output", "extract_citations")
     workflow.add_edge("extract_citations", "resolve_citations")  # NEW: Resolve to URLs
     workflow.add_edge("resolve_citations", "finalize_response")
