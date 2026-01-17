@@ -11,7 +11,7 @@ flowchart TD
     %% Define Styles
     classDef decision fill:#ffecb3,stroke:#ff6f00,stroke-width:2px,rx:10,ry:10;
     classDef process fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,rx:5,ry:5;
-    classDef terminal fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5,color:#000;
+    classDef terminal fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px,rx:5,ry:5;
     classDef action fill:#fff9c4,stroke:#fbc02d,stroke-dasharray: 5 5;
 
     %% Entry Point
