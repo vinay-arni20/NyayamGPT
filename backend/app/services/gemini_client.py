@@ -130,16 +130,18 @@ class GeminiClient:
         current_model = self.models[self.current_model_index]
         
         # Determine RPM based on model type (Free Tier Limits)
-        # gemini-2.0-flash -> 15 RPM (best free model)
-        # gemini-1.5-flash -> 15 RPM
-        # gemini-1.5-pro -> 2 RPM
-        # gemini-2.0-flash-lite -> 30 RPM
-        if "pro" in current_model.lower():
-            rpm = 2
+        # gemini-2.5-flash -> 10 RPM (latest, best quality)
+        # gemini-2.5-pro -> 5 RPM (highest quality, lower quota)
+        # gemini-2.0-flash -> 15 RPM (fast and reliable)
+        # gemini-2.0-flash-lite -> 30 RPM (fastest, lowest quality)
+        if "2.5-pro" in current_model.lower():
+            rpm = 5
+        elif "2.5-flash" in current_model.lower():
+            rpm = 10
         elif "lite" in current_model.lower():
             rpm = 30
         else:
-            rpm = 15  # Default for flash models
+            rpm = 15  # Default for 2.0-flash models
         
         # Get or create rate limiter for this model
         if current_model not in self.rate_limiters:

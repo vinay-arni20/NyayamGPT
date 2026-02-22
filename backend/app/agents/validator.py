@@ -192,13 +192,24 @@ class ValidationResult(BaseModel):
     
     @classmethod
     def from_dict(cls, data: dict) -> "ValidationResult":
-        """Create from dictionary with defaults for missing keys."""
+        """Create from dictionary with defaults for missing keys.
+        Handles both old field names (grounding_score, style_score, citation_score)
+        and new field names (faithfulness_score, citation_accuracy, clarity_score)."""
+        
+        # Handle the 'error' case from failed JSON parsing
+        if "error" in data and len(data) <= 2:
+            return cls(
+                is_valid=False,
+                problems=[data.get("error", "JSON parse error")],
+                required_fixes=["Retry validation"]
+            )
+        
         return cls(
             is_valid=data.get("is_valid", False),
-            faithfulness_score=data.get("faithfulness_score", 0.0),
-            citation_accuracy=data.get("citation_accuracy", 0.0),
+            faithfulness_score=data.get("faithfulness_score", data.get("grounding_score", 0.0)),
+            citation_accuracy=data.get("citation_accuracy", data.get("citation_score", 0.0)),
             completeness_score=data.get("completeness_score", 0.0),
-            clarity_score=data.get("clarity_score", 0.0),
+            clarity_score=data.get("clarity_score", data.get("style_score", 0.0)),
             problems=data.get("problems", []),
             hallucinated_citations=data.get("hallucinated_citations", []),
             required_fixes=data.get("required_fixes", data.get("fixes", [])),

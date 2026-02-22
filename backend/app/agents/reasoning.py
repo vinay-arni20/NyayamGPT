@@ -170,12 +170,13 @@ class GeminiService:
     ) -> dict[str, Any]:
         """
         Generate a JSON response from Gemini with caching.
+        Includes robust truncated-JSON repair.
         """
         span = trace.get_current_span()
         span.set_attribute("gemini.output_format", "json")
         
         # Add JSON instruction to prompt
-        json_instruction = "\n\nRespond with valid JSON only. No markdown, no explanations, just the JSON object."
+        json_instruction = "\n\nRespond with valid JSON only. No markdown, no explanations, just the JSON object. Keep arrays short (max 3 items each)."
         
         try:
             response_text = await self.generate(
@@ -201,6 +202,13 @@ class GeminiService:
             return result
             
         except json.JSONDecodeError as e:
+            # Attempt to repair truncated JSON
+            repaired = self._repair_truncated_json(response_text)
+            if repaired is not None:
+                span.set_attribute("gemini.json_repaired", True)
+                logger.warning("Repaired truncated JSON response")
+                return repaired
+            
             span.set_attribute("error", True)
             span.set_attribute("error.type", "json_parse_error")
             logger.error(
@@ -209,6 +217,54 @@ class GeminiService:
                 response_preview=response_text[:200] if response_text else None
             )
             return {"error": "Failed to parse response", "raw": response_text}
+    
+    @staticmethod
+    def _repair_truncated_json(text: str) -> Optional[dict]:
+        """
+        Attempt to repair truncated JSON by closing open brackets/braces.
+        Handles common cases where Gemini output is cut off mid-response.
+        """
+        if not text or not text.strip():
+            return None
+        
+        text = text.strip()
+        
+        # Try progressively aggressive truncation + closure
+        for attempt in range(5):
+            try:
+                # Count open brackets/braces
+                open_braces = text.count('{') - text.count('}')
+                open_brackets = text.count('[') - text.count(']')
+                
+                repaired = text
+                
+                # If we're inside a string value (odd number of unescaped quotes after last key),
+                # try to close the string first
+                if repaired.rstrip()[-1:] not in ('}', ']', '"', ',', 'e', 'l', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'):
+                    repaired = repaired + '"'
+                
+                # Remove trailing comma if present
+                repaired = repaired.rstrip()
+                if repaired.endswith(','):
+                    repaired = repaired[:-1]
+                
+                # Close open brackets then braces
+                repaired += ']' * max(0, open_brackets)
+                repaired += '}' * max(0, open_braces)
+                
+                result = json.loads(repaired)
+                if isinstance(result, dict):
+                    return result
+            except json.JSONDecodeError:
+                # Truncate more aggressively: remove last partial element
+                # Find last complete element (last comma before truncation)
+                last_comma = text.rfind(',')
+                if last_comma > 0:
+                    text = text[:last_comma]
+                else:
+                    break
+        
+        return None
     
     @tracer.start_as_current_span("gemini_generate_structured")
     async def generate_structured(
@@ -312,6 +368,77 @@ async def classify_intent(query: str) -> dict[str, Any]:
     if isinstance(result, dict):
         span.set_attribute("intent", result.get("intent", "unknown"))
         span.set_attribute("confidence", result.get("confidence", 0))
+    
+    return result
+
+
+@tracer.start_as_current_span("translate_and_classify")
+async def translate_and_classify(query: str) -> dict[str, Any]:
+    """
+    Translate and classify a user query in a SINGLE LLM call.
+    
+    Combines translate_query + classify_intent into one call for speed.
+    
+    Args:
+        query: User's original query
+        
+    Returns:
+        dict: Combined translation + classification result
+    """
+    from app.agents.prompts import COMBINED_TRANSLATE_AND_CLASSIFY_PROMPT
+    
+    span = trace.get_current_span()
+    span.set_attribute("query", query[:100])
+    
+    result = await gemini_generate(
+        "Detect language, translate to English if needed, and classify the legal query intent.",
+        COMBINED_TRANSLATE_AND_CLASSIFY_PROMPT.format(query=escape_braces(query)),
+        json_output=True,
+        use_cache=True
+    )
+    
+    if isinstance(result, dict):
+        span.set_attribute("intent", result.get("intent", "unknown"))
+        span.set_attribute("confidence", result.get("confidence", 0))
+        span.set_attribute("language", result.get("original_language", "unknown"))
+    
+    return result
+
+
+@tracer.start_as_current_span("rewrite_and_expand_query")
+async def rewrite_and_expand_query(query: str, clarification_context: str = "") -> dict[str, Any]:
+    """
+    Rewrite and expand a query in a SINGLE LLM call.
+    
+    Combines rewrite_query + expand_query into one call for speed.
+    
+    Args:
+        query: Original query
+        clarification_context: Additional context from clarification
+        
+    Returns:
+        dict: {rewritten_query, expanded_queries}
+    """
+    from app.agents.prompts import COMBINED_REWRITE_AND_EXPAND_PROMPT
+    
+    span = trace.get_current_span()
+    span.set_attribute("query", query[:100])
+    
+    context = f"Additional context: {clarification_context}" if clarification_context else ""
+    
+    result = await gemini_generate(
+        "Rewrite and expand this legal query for optimal search.",
+        COMBINED_REWRITE_AND_EXPAND_PROMPT.format(
+            query=escape_braces(query),
+            clarification_context=escape_braces(context)
+        ),
+        json_output=True,
+        use_cache=True
+    )
+    
+    if isinstance(result, dict):
+        span.set_attribute("rewritten_length", len(result.get("rewritten_query", "")))
+        span.set_attribute("expanded_count", len(result.get("expanded_queries", [])))
     
     return result
 
@@ -589,12 +716,21 @@ async def extract_citations(text: str) -> list[dict[str, Any]]:
     """
     Extract legal citations from text.
     
+    Uses fast regex extraction first. Falls back to LLM only if
+    regex finds nothing (unlikely for well-formatted legal answers).
+    
     Args:
         text: Text containing legal citations
         
     Returns:
         list[dict]: Extracted citations
     """
+    # Try fast regex extraction first
+    citations = extract_citations_regex(text)
+    if citations:
+        return citations
+    
+    # Fallback to LLM only if regex found nothing
     from app.agents.prompts import CITATION_EXTRACTOR_PROMPT
     
     result = await gemini_generate(
@@ -610,6 +746,125 @@ async def extract_citations(text: str) -> list[dict[str, Any]]:
         return result["citations"]
     else:
         return []
+
+
+def extract_citations_regex(text: str) -> list[dict[str, Any]]:
+    """
+    Extract legal citations using regex patterns (no LLM needed).
+    
+    This is fast and handles the vast majority of citation formats
+    produced by our draft answer prompts.
+    
+    Args:
+        text: Text containing legal citations
+        
+    Returns:
+        list[dict]: Extracted citations
+    """
+    import re
+    
+    citations = []
+    seen = set()
+    
+    # Act name mappings for normalization
+    act_aliases = {
+        "bns": "BNS", "bharatiya nyaya sanhita": "BNS",
+        "bnss": "BNSS", "bharatiya nagarik suraksha sanhita": "BNSS",
+        "bsa": "BSA", "bharatiya sakshya adhiniyam": "BSA",
+        "cpc": "CPC", "code of civil procedure": "CPC",
+        "hma": "HMA", "hindu marriage act": "HMA",
+        "mva": "MVA", "motor vehicles act": "MVA",
+        "nia": "NIA", "negotiable instruments act": "NIA",
+        "ida": "IDA", "industrial disputes act": "IDA",
+        "pocso": "POCSO", "pocso act": "POCSO",
+        "it act": "IT Act", "information technology act": "IT Act",
+        "ndps": "NDPS", "ndps act": "NDPS",
+        "sc/st act": "SC/ST Act", "sc/st": "SC/ST Act",
+        "constitution": "Constitution of India",
+        "constitution of india": "Constitution of India",
+        "ipc": "IPC", "indian penal code": "IPC",
+        "crpc": "CrPC", "code of criminal procedure": "CrPC",
+    }
+    
+    # Pattern 1: "Section X of/under ACT" or "Section X ACT"
+    pattern1 = re.compile(
+        r'[Ss]ection\s+([\d]+(?:\([^)]*\))?(?:\s*[-/]\s*[\d]+(?:\([^)]*\))?)?)\s+'
+        r'(?:of\s+|under\s+)?(?:the\s+)?'
+        r'(BNS|BNSS|BSA|CPC|HMA|MVA|NIA|IDA|POCSO|IT\s*Act|NDPS|SC/ST\s*(?:\(Prevention of Atrocities\))?\s*Act|'
+        r'Constitution(?:\s+of\s+India)?|IPC|CrPC|'
+        r'Bharatiya\s+Nyaya\s+Sanhita|Bharatiya\s+Nagarik\s+Suraksha\s+Sanhita|'
+        r'Bharatiya\s+Sakshya\s+Adhiniyam|Hindu\s+Marriage\s+Act|Motor\s+Vehicles\s+Act|'
+        r'Negotiable\s+Instruments\s+Act|Industrial\s+Disputes\s+Act|'
+        r'Code\s+of\s+Civil\s+Procedure|Information\s+Technology\s+Act)',
+        re.IGNORECASE
+    )
+    
+    # Pattern 2: "ACT Section X" (e.g., "BNS Section 103")
+    pattern2 = re.compile(
+        r'(BNS|BNSS|BSA|CPC|HMA|MVA|NIA|IDA|POCSO|IT\s*Act|NDPS|SC/ST\s*Act|IPC|CrPC)\s+'
+        r'[Ss]ection\s+([\d]+(?:\([^)]*\))?(?:\s*[-/]\s*[\d]+(?:\([^)]*\))?)?)',
+        re.IGNORECASE
+    )
+    
+    # Pattern 3: "Sec X ACT" or "Sec. X ACT" (abbreviated)
+    pattern3 = re.compile(
+        r'[Ss]ec\.?\s+([\d]+(?:\([^)]*\))?)\s+'
+        r'(?:of\s+|under\s+)?(?:the\s+)?'
+        r'(BNS|BNSS|BSA|CPC|HMA|MVA|NIA|IDA|POCSO|IT\s*Act|NDPS|SC/ST\s*Act|IPC|CrPC)',
+        re.IGNORECASE
+    )
+    
+    # Pattern 4: "Article X" (Constitution)
+    pattern4 = re.compile(
+        r'[Aa]rticle\s+([\d]+[A-Za-z]?(?:\([^)]*\))?)\s*'
+        r'(?:of\s+)?(?:the\s+)?(?:Constitution(?:\s+of\s+India)?)?',
+        re.IGNORECASE
+    )
+    
+    for match in pattern1.finditer(text):
+        section, act = match.group(1).strip(), match.group(2).strip()
+        act_normalized = act_aliases.get(act.lower(), act.upper())
+        key = f"{act_normalized}:{section}"
+        if key not in seen:
+            seen.add(key)
+            citations.append({
+                "type": "section", "law": act_normalized,
+                "section": section, "title": "", "context": ""
+            })
+    
+    for match in pattern2.finditer(text):
+        act, section = match.group(1).strip(), match.group(2).strip()
+        act_normalized = act_aliases.get(act.lower(), act.upper())
+        key = f"{act_normalized}:{section}"
+        if key not in seen:
+            seen.add(key)
+            citations.append({
+                "type": "section", "law": act_normalized,
+                "section": section, "title": "", "context": ""
+            })
+    
+    for match in pattern3.finditer(text):
+        section, act = match.group(1).strip(), match.group(2).strip()
+        act_normalized = act_aliases.get(act.lower(), act.upper())
+        key = f"{act_normalized}:{section}"
+        if key not in seen:
+            seen.add(key)
+            citations.append({
+                "type": "section", "law": act_normalized,
+                "section": section, "title": "", "context": ""
+            })
+    
+    for match in pattern4.finditer(text):
+        article = match.group(1).strip()
+        key = f"Constitution:{article}"
+        if key not in seen:
+            seen.add(key)
+            citations.append({
+                "type": "article", "law": "Constitution of India",
+                "article": article, "section": article, "title": "", "context": ""
+            })
+    
+    return citations
 
 
 @tracer.start_as_current_span("generate_constrained_answer")

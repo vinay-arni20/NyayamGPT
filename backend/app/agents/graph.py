@@ -22,6 +22,7 @@ from app.agents.types import GraphState
 from app.agents.nodes import (
     node_classify_intent,
     node_collect_missing_details,
+    node_conversational_response,
     node_rewrite_query,
     node_classify_query_for_constrained_rag,
     node_expand_query,
@@ -49,13 +50,15 @@ def create_legal_assistant_graph() -> StateGraph:
     """
     Create the LangGraph workflow for the legal assistant.
     
-    Workflow:
-    1. Classify Intent → Check if clarification needed
+    OPTIMIZED Workflow (v2.1):
+    1. Classify Intent (combined translate+classify, 1 LLM call)
     2. If clarification needed → Collect details → Return question
-    3. If clear → Rewrite query → Retrieve docs
-    4. Generate draft → Validate (loop) → Simplify → Extract citations
-    5. Resolve citations to official URLs (internet search)
-    6. Finalize response
+    3. If clear → Rewrite+Expand query (combined, 1 LLM call) → Classify → Retrieve docs
+    4. Generate draft (with simplification built-in, 1 LLM call) → Validate (1 attempt max)
+    5. Severity check (local regex, no LLM) → Extract citations (regex, no LLM)
+    6. Resolve citations (parallel HTTP) → Finalize
+    
+    Total LLM calls: ~3-4 (down from ~10-12)
     
     Returns:
         StateGraph: Compiled LangGraph workflow
@@ -67,17 +70,18 @@ def create_legal_assistant_graph() -> StateGraph:
     # Add nodes
     workflow.add_node("classify_intent", node_classify_intent)
     workflow.add_node("collect_missing_details", node_collect_missing_details)
-    workflow.add_node("rewrite_query", node_rewrite_query)
-    workflow.add_node("classify_query", node_classify_query_for_constrained_rag)  # NEW: Constrained RAG
-    workflow.add_node("expand_query", node_expand_query)
+    workflow.add_node("conversational_response", node_conversational_response)
+    workflow.add_node("rewrite_query", node_rewrite_query)  # Now does rewrite+expand combined
+    workflow.add_node("classify_query", node_classify_query_for_constrained_rag)
+    workflow.add_node("expand_query", node_expand_query)  # Passthrough (already done in rewrite)
     workflow.add_node("retrieve_docs", node_retrieve_docs)
     workflow.add_node("draft_answer", node_draft_answer)
     workflow.add_node("draft_document", node_draft_document)
     workflow.add_node("validate_answer", node_validate_answer)
-    workflow.add_node("validate_severity", node_validate_severity)  # NEW: Severity validation
-    workflow.add_node("simplify_output", node_simplify_output)
-    workflow.add_node("extract_citations", node_extract_citations)
-    workflow.add_node("resolve_citations", node_resolve_citations)  # NEW: Internet URL lookup
+    workflow.add_node("validate_severity", node_validate_severity)  # Now local regex (no LLM)
+    workflow.add_node("simplify_output", node_simplify_output)  # Passthrough (built into draft)
+    workflow.add_node("extract_citations", node_extract_citations)  # Now regex-first
+    workflow.add_node("resolve_citations", node_resolve_citations)  # Now parallel resolution
     workflow.add_node("finalize_response", node_finalize_response)
     
     # Set entry point
@@ -89,6 +93,7 @@ def create_legal_assistant_graph() -> StateGraph:
         should_clarify,
         {
             "clarify": "collect_missing_details",
+            "conversational": "conversational_response",
             "draft": "draft_document",
             "continue": "rewrite_query"
         }
@@ -97,14 +102,17 @@ def create_legal_assistant_graph() -> StateGraph:
     # Clarification path ends (returns to user for more info)
     workflow.add_edge("collect_missing_details", "finalize_response")
     
+    # Conversational path ends (immediate response, no RAG needed)
+    workflow.add_edge("conversational_response", "finalize_response")
+    
     # Drafting path
     workflow.add_edge("draft_document", "finalize_response")
     
     # Main processing path
     workflow.add_node("search_case_law", node_search_case_law)
     
-    workflow.add_edge("rewrite_query", "classify_query")      # NEW: Classify before expand
-    workflow.add_edge("classify_query", "expand_query")       # Then expand
+    workflow.add_edge("rewrite_query", "classify_query")      # Classify before expand
+    workflow.add_edge("classify_query", "expand_query")       # Passthrough (already expanded)
     workflow.add_edge("expand_query", "retrieve_docs")
     
     # Conditional Web Search (Stage 2 Fallback)
@@ -129,10 +137,10 @@ def create_legal_assistant_graph() -> StateGraph:
         }
     )
     
-    workflow.add_edge("validate_answer", "validate_severity")  # NEW: Check severity match
-    workflow.add_edge("validate_severity", "simplify_output")
-    workflow.add_edge("simplify_output", "extract_citations")
-    workflow.add_edge("extract_citations", "resolve_citations")  # NEW: Resolve to URLs
+    workflow.add_edge("validate_answer", "validate_severity")  # Local regex check (fast)
+    workflow.add_edge("validate_severity", "simplify_output")  # Passthrough (fast)
+    workflow.add_edge("simplify_output", "extract_citations")  # Regex-first (fast)
+    workflow.add_edge("extract_citations", "resolve_citations")  # Parallel HTTP (fast)
     workflow.add_edge("resolve_citations", "finalize_response")
     
     # End

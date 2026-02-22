@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 class Intent(str, Enum):
     """User intent classification categories."""
     
+    CONVERSATIONAL = "CONVERSATIONAL"
     LEGAL_QUERY = "LEGAL_QUERY"
     CASE_ANALYSIS = "CASE_ANALYSIS"
     LEGAL_DRAFTING = "LEGAL_DRAFTING"

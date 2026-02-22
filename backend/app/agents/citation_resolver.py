@@ -201,16 +201,21 @@ class CitationResolver:
         citations: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """
-        Resolve multiple citations to URLs.        
+        Resolve multiple citations to URLs in parallel.
+        
+        OPTIMIZED: Uses asyncio.gather for concurrent resolution
+        instead of sequential resolution. Saves significant time
+        when there are multiple citations.
+        
         Args:
             citations: List of citation dicts with act, section, title
             
         Returns:
             list: Citations with URLs added
         """
-        resolved = []
+        import asyncio
         
-        for citation in citations:
+        async def _resolve_one(citation: dict[str, Any]) -> dict[str, Any]:
             act = citation.get("act", citation.get("law", ""))
             section = citation.get("section", "")
             title = citation.get("title", "")
@@ -222,12 +227,27 @@ class CitationResolver:
                     k: v for k, v in citation.items() 
                     if k not in ["act", "section", "title", "url", "verified"]
                 })
-                resolved.append(resolved_citation)
+                return resolved_citation
             else:
                 # Keep original if missing required fields
-                resolved.append(citation)
+                return citation
         
-        return resolved
+        # Resolve all citations concurrently
+        resolved = await asyncio.gather(
+            *[_resolve_one(c) for c in citations],
+            return_exceptions=True
+        )
+        
+        # Filter out exceptions, keep originals for failed resolutions
+        result = []
+        for i, r in enumerate(resolved):
+            if isinstance(r, Exception):
+                logger.warning(f"Citation resolution failed for {citations[i]}: {r}")
+                result.append(citations[i])
+            else:
+                result.append(r)
+        
+        return result
     
     def _get_fallback_url(self, act: str, section: str) -> str:
         """

@@ -262,6 +262,7 @@ nyayamgpt.db
 dump.rdb
 appendonly.aof
 redis.log
+*.pdb
 
 # Vector Store
 backend/data/vectorstore/

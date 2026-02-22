@@ -139,8 +139,8 @@ class Settings(BaseSettings):
         description="Number of documents to retrieve"
     )
     max_validation_attempts: int = Field(
-        default=3,
-        description="Maximum validation loop iterations"
+        default=1,
+        description="Maximum validation loop iterations (reduced from 3 for speed)"
     )
     chunk_size: int = Field(
         default=1000,
@@ -153,12 +153,12 @@ class Settings(BaseSettings):
     
     # Gemini Model Settings (Free Tier Models)
     gemini_model: str = Field(
-        default="gemini-2.0-flash",
-        description="Primary Gemini model - gemini-2.0-flash is the best free model"
+        default="gemini-2.5-flash",
+        description="Primary Gemini model - gemini-2.5-flash is the latest and best free model"
     )
     gemini_fallback_models: str = Field(
-        default="gemini-1.5-flash,gemini-1.5-pro,gemini-2.0-flash-lite",
-        description="Comma-separated list of fallback Gemini models (all free tier)"
+        default="gemini-2.0-flash,gemini-2.5-pro,gemini-2.0-flash-lite",
+        description="Comma-separated list of fallback Gemini models (all currently available)"
     )
     gemini_temperature: float = Field(
         default=0.1,
