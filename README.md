@@ -1083,8 +1083,8 @@ MIT License — Copyright (c) 2024–2026 NyayamGPT Contributors
 
 | Version | Date | Highlights |
 |---------|------|-----------|
-| **2.0.0** | Jan 2026 | Modular prompt architecture · 2023 Criminal Codes (BNS, BNSS, BSA) · Mode-specific validation · PDF auto-indexing · Exponential backoff retry |
-| **1.0.0** | Dec 2024 | Initial release — 8 acts indexed, multi-language, citation verification, offline mode |
+| **2.0.0** | feb 2026 | Modular prompt architecture · 2023 Criminal Codes (BNS, BNSS, BSA) · Mode-specific validation · PDF auto-indexing · Exponential backoff retry |
+| **1.0.0** | Dec 2025 | Initial release — 8 acts indexed, multi-language, citation verification, offline mode |
 
 ---
 
